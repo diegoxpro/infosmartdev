@@ -1,0 +1,12 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+keystore.properties
+*.jks
+secretos/
+.env
+__pycache__/
+*.db
+app/src/test/snapshots/images/
