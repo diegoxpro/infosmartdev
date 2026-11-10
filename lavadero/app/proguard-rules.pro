@@ -1,0 +1,11 @@
+-keepattributes *Annotation*, InnerClasses
+-dontnote kotlinx.serialization.**
+-keepclassmembers class kotlinx.serialization.json.** { *** Companion; }
+-keep,includedescriptorclasses class pe.elfirme.caja.**$$serializer { *; }
+-keepclassmembers class pe.elfirme.caja.** { *** Companion; }
+-keepclasseswithmembers class pe.elfirme.caja.** { kotlinx.serialization.KSerializer serializer(...); }
+-dontwarn okhttp3.internal.platform.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.conscrypt.**
+-dontwarn org.openjsse.**
+-dontwarn com.google.errorprone.annotations.**

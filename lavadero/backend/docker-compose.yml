@@ -1,0 +1,43 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: elfirme
+      POSTGRES_USER: elfirme
+      POSTGRES_PASSWORD: ${DB_CLAVE:?Define DB_CLAVE en .env}
+    volumes:
+      - datos:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U elfirme -d elfirme"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://elfirme:${DB_CLAVE}@db:5432/elfirme
+      JWT_SECRETO: ${JWT_SECRETO:?Define JWT_SECRETO en .env}
+      CLAVE_CIFRADO: ${CLAVE_CIFRADO:-}
+      ADMIN_USUARIO: ${ADMIN_USUARIO:-admin}
+      ADMIN_CLAVE: ${ADMIN_CLAVE:?Define ADMIN_CLAVE en .env}
+      IP_PUBLICA: ${IP_PUBLICA:-190.119.59.24}
+      SUNAT_ENTORNO: ${SUNAT_ENTORNO:-beta}
+      SUNAT_RUC: ${SUNAT_RUC:-20000000001}
+      SUNAT_USUARIO: ${SUNAT_USUARIO:-MODDATOS}
+      SUNAT_CLAVE: ${SUNAT_CLAVE:-moddatos}
+      CERT_RUTA: /secretos/certificado.pfx
+      CERT_CLAVE: ${CERT_CLAVE:-}
+    ports:
+      - "${PUERTO:-8443}:8443"
+    volumes:
+      - ./secretos:/secretos:ro
+      - certs:/certs
+
+volumes:
+  datos:
+  certs:
