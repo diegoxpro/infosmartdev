@@ -17,7 +17,7 @@ from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from . import ajustes, db, decolecta, emision, seguridad
+from . import ajustes, contexto, db, decolecta, emision, nube, semilla, seguridad
 from .config import CFG, TASA_IGV
 from .emision import ErrorNegocio
 from .sunat import firma, ubl
@@ -28,45 +28,20 @@ log = logging.getLogger("api")
 
 def _sembrar() -> None:
     with db.Sesion() as s:
-        if s.get(db.Empresa, 1) is None:
-            s.add(db.Empresa(id=1, ruc="", razon_social="", nombre_comercial="", ubigeo="", departamento="", provincia="", distrito="", mensaje_ticket=""))
-        else:
-            # Instalaciones anteriores: se quitan los valores de relleno mientras nadie haya cargado datos reales.
-            e = s.get(db.Empresa, 1)
-            if e.ruc == ajustes.RUC_BETA and e.razon_social == "EL FIRME" and not e.direccion.strip():
-                e.ruc = e.razon_social = e.nombre_comercial = e.ubigeo = e.departamento = e.provincia = e.distrito = e.mensaje_ticket = ""
-        if s.get(db.Configuracion, 1) is None:
-            s.add(db.Configuracion(id=1))
-        for tipo, serie in (("01", "F001"), ("03", "B001")):
-            if s.get(db.Serie, tipo) is None:
-                s.add(db.Serie(tipo=tipo, serie=serie, ultimo=0))
-        # Clientes registrados antes de estandarizar a mayúsculas.
-        for cliente in s.execute(select(db.Cliente)).scalars():
-            cliente.nombre = emision.normalizar(cliente.nombre)
-            cliente.direccion = emision.normalizar(cliente.direccion)
-        hay_usuarios = s.execute(select(db.Usuario.id).limit(1)).first() is not None
-        if not hay_usuarios and CFG.admin_clave:
-            s.add(db.Usuario(usuario=CFG.admin_usuario, nombre="Administrador",
-                             clave_hash=seguridad.hash_clave(CFG.admin_clave), rol="admin"))
-        if s.execute(select(db.Servicio.id).limit(1)).first() is None:
-            base = [("LAV01", "Lavado exterior auto", "20.00", "Lavado"),
-                    ("LAV02", "Lavado completo auto", "35.00", "Lavado"),
-                    ("LAV03", "Lavado completo camioneta", "45.00", "Lavado"),
-                    ("LAV04", "Lavado de motor", "40.00", "Lavado"),
-                    ("LAV05", "Lavado de salón", "120.00", "Lavado"),
-                    ("OTR01", "Encerado", "30.00", "Otros"),
-                    ("OTR02", "Aspirado", "10.00", "Otros")]
-            s.add_all(db.Servicio(codigo=c, nombre=n, precio=Decimal(p), categoria=k, orden=i)
-                      for i, (c, n, p, k) in enumerate(base))
-        s.commit()
+        semilla.sembrar(s, admin_usuario=CFG.admin_usuario, admin_clave=CFG.admin_clave)
 
 
 @asynccontextmanager
 async def ciclo(_: FastAPI):
     if len(CFG.jwt_secreto) < 32:
         raise RuntimeError("JWT_SECRETO debe tener al menos 32 caracteres")
-    db.crear_tablas()
-    _sembrar()
+    if nube.ACTIVO:
+        # Cada empresa se prepara en su primera petición (ver nube.Registro).
+        if not (CFG.clave_interna and CFG.dominio_base and "{db}" in CFG.empresa_database_url):
+            raise RuntimeError("En modo nube faltan CLAVE_INTERNA, DOMINIO_BASE o EMPRESA_DATABASE_URL con {db}")
+    else:
+        db.crear_tablas()
+        _sembrar()
     trabajador = emision.Trabajador()
     trabajador.start()
     yield
@@ -74,6 +49,8 @@ async def ciclo(_: FastAPI):
 
 
 app = FastAPI(title="El Firme", lifespan=ciclo, docs_url=None, redoc_url=None, openapi_url=None)
+if nube.ACTIVO:
+    app.add_middleware(nube.MiddlewareEmpresa)
 
 
 @app.exception_handler(ErrorNegocio)
@@ -96,7 +73,7 @@ S = Annotated[Session, Depends(sesion)]
 
 def usuario_actual(request: Request, s: S) -> db.Usuario:
     cabecera = request.headers.get("authorization", "")
-    datos = seguridad.leer_token(cabecera[7:]) if cabecera.lower().startswith("bearer ") else None
+    datos = seguridad.leer_token(cabecera[7:], contexto.subdominio()) if cabecera.lower().startswith("bearer ") else None
     if datos is None:
         raise HTTPException(401, "Sesión no válida")
     u = s.get(db.Usuario, datos[0])
@@ -117,6 +94,14 @@ def solo_admin(u: U) -> db.Usuario:
 A = Annotated[db.Usuario, Depends(solo_admin)]
 
 
+def solo_local() -> None:
+    if contexto.actual() is not None:
+        raise HTTPException(403, "Esto lo configura Infosmart desde su panel. Comunícate con Infosmart para cambiarlo.")
+
+
+L = Depends(solo_local)
+
+
 class LoginE(BaseModel):
     usuario: str
     clave: str
@@ -128,13 +113,14 @@ def _usuario(u: db.Usuario) -> dict:
 
 @app.get("/health")
 def salud(s: S) -> dict:
-    return {"ok": True, "entorno": ajustes.efectivo(s).entorno}
+    f = contexto.actual()
+    return {"ok": True, "entorno": ajustes.efectivo(s).entorno, **({"empresa": f.razon_social} if f else {})}
 
 
 @app.post("/auth/login")
 def login(d: LoginE, request: Request, s: S) -> dict:
     ip = request.client.host if request.client else "?"
-    clave_lim = f"{d.usuario.lower()}|{ip}"
+    clave_lim = f"{contexto.subdominio()}|{d.usuario.lower()}|{ip}"
     if seguridad.limitador.bloqueado(clave_lim):
         raise HTTPException(429, "Demasiados intentos. Espera 15 minutos.")
     u = s.execute(select(db.Usuario).where(db.Usuario.usuario == d.usuario.strip().lower())).scalar_one_or_none()
@@ -142,7 +128,7 @@ def login(d: LoginE, request: Request, s: S) -> dict:
         seguridad.limitador.fallo(clave_lim)
         raise HTTPException(401, "Usuario o clave incorrectos")
     seguridad.limitador.exito(clave_lim)
-    return {"token": seguridad.crear_token(u.id, u.version_token), "usuario": _usuario(u)}
+    return {"token": seguridad.crear_token(u.id, u.version_token, contexto.subdominio()), "usuario": _usuario(u)}
 
 
 @app.get("/me")
@@ -174,7 +160,7 @@ def _empresa(e: db.Empresa) -> dict:
 def empresa(_: U, s: S) -> dict:
     c = ajustes.obtener(s)
     return {**_empresa(s.get(db.Empresa, 1)), "entorno": ajustes.efectivo(s).entorno, "tasa_igv": TASA_IGV,
-            "tiene_logo": c.logo is not None, "logo_version": c.logo_version}
+            "tiene_logo": c.logo is not None, "logo_version": c.logo_version, "nube": contexto.actual() is not None}
 
 
 @app.put("/empresa")
@@ -192,6 +178,8 @@ def actualizar_empresa(d: EmpresaE, _: A, s: S) -> dict:
     if not (d.departamento.strip() and d.provincia.strip() and d.distrito.strip()):
         raise ErrorNegocio("Escribe el departamento, la provincia y el distrito.")
     e = s.get(db.Empresa, 1)
+    if contexto.actual() is not None and d.ruc != e.ruc:
+        raise ErrorNegocio("El RUC lo cambia Infosmart desde su panel.")
     if ajustes.efectivo(s).entorno == "produccion" and d.ruc != e.ruc:
         raise ErrorNegocio("El RUC no se puede cambiar en producción.")
     for k, v in d.model_dump().items():
@@ -269,8 +257,11 @@ def _info_certificado(contenido: bytes, clave: str) -> dict:
 def _ajustes_sunat(s: Session) -> dict:
     c = ajustes.obtener(s)
     e = ajustes.efectivo(s)
+    f = contexto.actual()
     return {
-        "entorno": e.entorno, "ruc": e.ruc, "usuario": c.sunat_usuario, "clave_guardada": bool(c.sunat_clave_cif),
+        "entorno": e.entorno, "ruc": e.ruc, "nube": f is not None,
+        "usuario": f.sol_usuario if f else c.sunat_usuario,
+        "clave_guardada": bool(f.sol_clave) if f else bool(c.sunat_clave_cif),
         "certificado": _info_certificado(e.pfx, e.pfx_clave),
         "comprobantes": s.execute(select(func.count()).select_from(db.Comprobante)).scalar_one(),
     }
@@ -282,7 +273,7 @@ def ver_ajustes_sunat(_: A, s: S) -> dict:
 
 
 @app.put("/ajustes/sunat")
-def guardar_ajustes_sunat(d: SunatE, _: A, s: S) -> dict:
+def guardar_ajustes_sunat(d: SunatE, _: A, s: S, __: None = L) -> dict:
     c = ajustes.obtener(s)
     e = ajustes.efectivo(s)
     if d.ruc != ajustes.RUC_BETA and not emision.ruc_valido(d.ruc):
@@ -298,7 +289,7 @@ def guardar_ajustes_sunat(d: SunatE, _: A, s: S) -> dict:
 
 
 @app.put("/ajustes/sunat/certificado")
-def subir_certificado(d: CertificadoE, _: A, s: S) -> dict:
+def subir_certificado(d: CertificadoE, _: A, s: S, __: None = L) -> dict:
     try:
         contenido = base64.b64decode(d.archivo_b64, validate=True)
     except binascii.Error as exc:
@@ -316,7 +307,7 @@ def subir_certificado(d: CertificadoE, _: A, s: S) -> dict:
 
 
 @app.post("/ajustes/sunat/activar-produccion")
-def activar_produccion(d: ActivarE, _: A, s: S) -> dict:
+def activar_produccion(d: ActivarE, _: A, s: S, __: None = L) -> dict:
     """Pasa a comprobantes reales. Borra las ventas y gastos de prueba y reinicia la numeración."""
     if d.confirmacion != "PRODUCCION":
         raise ErrorNegocio("Escribe PRODUCCION para confirmar.")
@@ -375,14 +366,10 @@ class ProbarE(BaseModel):
     token: str = Field(default="", max_length=500)
 
 
-def _token(c: db.Configuracion) -> str:
-    return ajustes.descifrar(c.decolecta_token_cif).decode()
-
-
 def _ajustes_consultas(s: Session) -> dict:
-    c = ajustes.obtener(s)
-    t = _token(c)
-    return {"activo": c.decolecta_activo, "token_guardado": bool(t), "token_final": t[-4:] if len(t) >= 12 else ""}
+    activo, t = ajustes.consulta(s)
+    return {"activo": activo, "token_guardado": bool(t), "token_final": t[-4:] if len(t) >= 12 else "",
+            "nube": contexto.actual() is not None}
 
 
 @app.get("/ajustes/consultas")
@@ -391,7 +378,7 @@ def ver_ajustes_consultas(_: A, s: S) -> dict:
 
 
 @app.put("/ajustes/consultas")
-def guardar_ajustes_consultas(d: ConsultasE, _: A, s: S) -> dict:
+def guardar_ajustes_consultas(d: ConsultasE, _: A, s: S, __: None = L) -> dict:
     c = ajustes.obtener(s)
     c.decolecta_activo = d.activo
     if d.token.strip():
@@ -402,7 +389,7 @@ def guardar_ajustes_consultas(d: ConsultasE, _: A, s: S) -> dict:
 
 @app.post("/ajustes/consultas/probar")
 def probar_consultas(d: ProbarE, _: A, s: S) -> dict:
-    token = d.token.strip() or _token(ajustes.obtener(s))
+    token = (d.token.strip() if contexto.actual() is None else "") or ajustes.consulta(s)[1]
     if not token:
         raise ErrorNegocio("Escribe el token de Decolecta.")
     # Consume una consulta del plan; se usa el RUC público de la SUNAT.
@@ -425,9 +412,8 @@ def consultar_documento(tipo: str, numero: str, _: U, s: S) -> dict:
     guardado = s.execute(select(db.Cliente).where(db.Cliente.tipo_doc == tipo_doc, db.Cliente.num_doc == numero)).scalar_one_or_none()
     if guardado is not None:
         return {**_cliente(guardado), "origen": "clientes"}
-    c = ajustes.obtener(s)
-    token = _token(c)
-    if not c.decolecta_activo or not token:
+    activo, token = ajustes.consulta(s)
+    if not activo or not token:
         raise HTTPException(409, "La consulta en línea no está configurada.")
     p = decolecta.consultar_dni(token, numero) if tipo == "dni" else decolecta.consultar_ruc(token, numero)
     return {"tipo_doc": p.tipo_doc, "num_doc": p.num_doc, "nombre": p.nombre, "direccion": p.direccion, "telefono": "",
@@ -797,8 +783,19 @@ def usuarios(_: A, s: S) -> list[dict]:
     return [_usuario(u) for u in s.execute(select(db.Usuario).order_by(db.Usuario.nombre)).scalars()]
 
 
+def _revisar_limite(s: Session) -> None:
+    """Modo nube: el plan de Infosmart fija cuántos usuarios activos puede tener la empresa."""
+    f = contexto.actual()
+    if f is None:
+        return
+    activos = s.execute(select(func.count()).select_from(db.Usuario).where(db.Usuario.activo.is_(True))).scalar_one()
+    if activos >= f.max_usuarios:
+        raise ErrorNegocio(f"Tu plan permite {f.max_usuarios} usuarios activos. Desactiva uno o pide a Infosmart un plan mayor.")
+
+
 @app.post("/usuarios")
 def crear_usuario(d: UsuarioE, _: A, s: S) -> dict:
+    _revisar_limite(s)
     u = db.Usuario(usuario=d.usuario.lower(), nombre=d.nombre, clave_hash=seguridad.hash_clave(d.clave), rol=d.rol)
     s.add(u)
     try:
@@ -824,7 +821,13 @@ def cambiar_usuario(uid: int, d: UsuarioCambioE, yo_: A, s: S) -> dict:
         u.clave_hash = seguridad.hash_clave(d.clave)
         u.version_token += 1
     if d.activo is not None:
+        if d.activo and not u.activo:
+            _revisar_limite(s)
         u.activo = d.activo
         u.version_token += 1
     s.commit()
+    f = contexto.actual()
+    if d.clave and f is not None and u.usuario == f.admin_usuario and f.admin_temporal:
+        nube.reportar(f.subdominio, claveCambiada=True)
+        nube.registro.olvidar(f.subdominio)
     return _usuario(u)

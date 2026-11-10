@@ -1,12 +1,14 @@
 """Modelos y sesión de base de datos."""
 from __future__ import annotations
 
+from contextvars import ContextVar
 from datetime import date, datetime, time
 from decimal import Decimal
 
 from sqlalchemy import (Boolean, Date, DateTime, ForeignKey, Integer, LargeBinary, Numeric, String, Text, Time,
                         UniqueConstraint, cast, create_engine, inspect, text)
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from .config import CFG
@@ -17,7 +19,13 @@ if CFG.database_url.startswith("sqlite"):
     if ":memory:" in CFG.database_url:
         _args["poolclass"] = StaticPool
 motor = create_engine(CFG.database_url, pool_pre_ping=True, **_args)
-Sesion = sessionmaker(motor, expire_on_commit=False)
+_sesion_local = sessionmaker(motor, expire_on_commit=False)
+# En modo nube, la fábrica de sesiones de la empresa que se está atendiendo.
+fabrica_actual: ContextVar[sessionmaker | None] = ContextVar("fabrica_actual", default=None)
+
+
+def Sesion() -> Session:  # noqa: N802 - conserva el nombre de la fábrica original
+    return (fabrica_actual.get() or _sesion_local)()
 
 Dinero = Numeric(12, 2)
 
@@ -57,6 +65,8 @@ class Configuracion(Base):
     decolecta_token_cif: Mapped[str] = mapped_column(Text, default="")
     decolecta_activo: Mapped[bool] = mapped_column(Boolean, default=True)
     afectacion: Mapped[str] = mapped_column(String(2), default="10", server_default="10")
+    # Modo nube: último hash de la clave del administrador que llegó del panel Infosmart.
+    nube_admin_hash: Mapped[str] = mapped_column(String(200), default="", server_default="")
 
 
 class Usuario(Base):
@@ -179,10 +189,14 @@ def cast_correlativo():
     return cast(Comprobante.correlativo, String)
 
 
-def crear_tablas() -> None:
-    Base.metadata.create_all(motor)
+def crear_tablas(m: Engine | None = None) -> None:
+    m = m or motor
+    Base.metadata.create_all(m)
     # create_all no agrega columnas a tablas ya existentes.
-    for tabla in ("comprobantes", "configuracion"):
-        if "afectacion" not in {c["name"] for c in inspect(motor).get_columns(tabla)}:
-            with motor.begin() as conexion:
-                conexion.execute(text(f"ALTER TABLE {tabla} ADD COLUMN afectacion VARCHAR(2) NOT NULL DEFAULT '10'"))
+    agregar = [("comprobantes", "afectacion", "VARCHAR(2) NOT NULL DEFAULT '10'"),
+               ("configuracion", "afectacion", "VARCHAR(2) NOT NULL DEFAULT '10'"),
+               ("configuracion", "nube_admin_hash", "VARCHAR(200) NOT NULL DEFAULT ''")]
+    for tabla, columna, tipo in agregar:
+        if columna not in {c["name"] for c in inspect(m).get_columns(tabla)}:
+            with m.begin() as conexion:
+                conexion.execute(text(f"ALTER TABLE {tabla} ADD COLUMN {columna} {tipo}"))

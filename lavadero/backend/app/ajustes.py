@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy.orm import Session
 
-from . import db
+from . import contexto, db
 from .config import CFG
 
 log = logging.getLogger("ajustes")
@@ -58,6 +58,13 @@ class Efectivo:
 
 
 def efectivo(s: Session) -> Efectivo:
+    f = contexto.actual()
+    if f is not None:
+        # Modo nube: SUNAT y el certificado se administran solo desde el panel Infosmart.
+        # «Desactivado» se trata como pruebas: los comprobantes van al ambiente beta.
+        if f.sunat_modo == "PRODUCCION":
+            return Efectivo("produccion", f.ruc, f.sol_usuario, f.sol_clave, f.certificado, f.certificado_clave)
+        return Efectivo("beta", f.ruc, USUARIO_BETA, CLAVE_BETA, f.certificado, f.certificado_clave)
     c = obtener(s)
     empresa = s.get(db.Empresa, 1)
     entorno = c.sunat_entorno or CFG.sunat_entorno
@@ -69,3 +76,12 @@ def efectivo(s: Session) -> Efectivo:
         usuario = c.sunat_usuario or CFG.sunat_usuario
         clave = descifrar(c.sunat_clave_cif).decode() or CFG.sunat_clave
     return Efectivo(entorno, ruc, usuario, clave, descifrar(c.cert_pfx_cif), descifrar(c.cert_clave_cif).decode())
+
+
+def consulta(s: Session) -> tuple[bool, str]:
+    """(activa, token) de la consulta DNI/RUC en línea."""
+    f = contexto.actual()
+    if f is not None:
+        return bool(f.consulta_token), f.consulta_token
+    c = obtener(s)
+    return c.decolecta_activo, descifrar(c.decolecta_token_cif).decode()

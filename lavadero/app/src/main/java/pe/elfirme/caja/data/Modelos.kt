@@ -47,12 +47,19 @@ data class AjustesSunat(
     val claveGuardada: Boolean = false,
     val certificado: CertificadoInfo = CertificadoInfo(),
     val comprobantes: Int = 0,
+    // Empresa en la nube Infosmart: SUNAT y el certificado se administran desde su panel.
+    val nube: Boolean = false,
 ) {
     val enProduccion get() = entorno == "produccion"
 }
 
 @Serializable
-data class AjustesConsultas(val activo: Boolean = true, val tokenGuardado: Boolean = false, val tokenFinal: String = "")
+data class AjustesConsultas(
+    val activo: Boolean = true,
+    val tokenGuardado: Boolean = false,
+    val tokenFinal: String = "",
+    val nube: Boolean = false,
+)
 
 @Serializable
 data class AjustesVentas(val afectacion: String = "10")

@@ -18,7 +18,8 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "pe.elfirme.caja"
+        // Distinto al de la app propia de El Firme, para poder tener ambas en el mismo teléfono
+        applicationId = "pe.infosmart.lavadero"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

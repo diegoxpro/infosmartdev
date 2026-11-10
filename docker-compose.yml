@@ -51,6 +51,30 @@ services:
       URL_PUBLICA: ${URL_PUBLICA:-http://{sub}.190.119.59.24.nip.io:8092}
       TZ: America/Lima
 
+  # App del lavadero (API de la app Android). Sirve HTTPS con su propio certificado:
+  # la app confirma una sola vez su huella, que aparece en el log al arrancar.
+  lavadero:
+    build: ./lavadero/backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      panel-api:
+        condition: service_started
+    environment:
+      PANEL_URL: http://panel-api:3100
+      CLAVE_INTERNA: ${CLAVE_INTERNA}
+      DOMINIO_BASE: ${DOMINIO_BASE:-190.119.59.24.nip.io}
+      EMPRESA_DATABASE_URL: postgresql+psycopg://infosmart:${DB_CLAVE}@db:5432/{db}
+      JWT_SECRETO: ${JWT_SECRETO}-lavadero
+      CLAVE_CIFRADO: ${CLAVE_CIFRADO}
+      IP_PUBLICA: ${IP_PANEL:-190.119.59.24}
+      TZ: America/Lima
+    ports:
+      - "${LAVADERO_PUERTO:-8093}:8443"
+    volumes:
+      - certs-lavadero:/certs
+
   panel-web:
     build: ./panel/frontend
     restart: unless-stopped
@@ -64,3 +88,4 @@ services:
 volumes:
   datos-db:
   respaldos:
+  certs-lavadero:

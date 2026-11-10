@@ -10,7 +10,7 @@ from decimal import Decimal
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from . import ajustes, db
+from . import ajustes, contexto, db
 from .config import CFG, LIMA
 from .sunat import cliente as sc
 from .sunat import firma, ubl
@@ -160,6 +160,11 @@ def _certificado(s: Session) -> firma.Certificado:
     e = ajustes.efectivo(s)
     if e.pfx:
         return firma.cargar_bytes(e.pfx, e.pfx_clave)
+    if contexto.actual() is not None:
+        # Modo nube: nunca se usa el certificado del servidor, que es de otra empresa.
+        if e.entorno == "produccion":
+            raise ErrorNegocio("Falta cargar el certificado digital en Infosmart.")
+        return firma.certificado_prueba()
     return firma.cargar_certificado(CFG.cert_ruta, CFG.cert_clave)
 
 
@@ -335,8 +340,16 @@ class Trabajador(threading.Thread):
     def run(self) -> None:
         while not self.parar.wait(CFG.intervalo_worker_s):
             try:
-                with db.Sesion() as s:
-                    enviar_pendientes(s)
-                    consultar_anulaciones(s)
+                if CFG.panel_url:
+                    from . import nube  # import tardío: nube depende de este módulo
+                    nube.para_cada_empresa("envíos SUNAT", _ciclo)
+                else:
+                    _ciclo()
             except Exception:  # noqa: BLE001 - el trabajador nunca debe morir
                 log.exception("Fallo en el ciclo de envíos")
+
+
+def _ciclo() -> None:
+    with db.Sesion() as s:
+        enviar_pendientes(s)
+        consultar_anulaciones(s)

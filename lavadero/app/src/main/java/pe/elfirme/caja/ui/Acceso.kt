@@ -34,15 +34,18 @@ import kotlinx.coroutines.launch
 import pe.elfirme.caja.data.Api
 import pe.elfirme.caja.data.ErrorApi
 import pe.elfirme.caja.data.HuellaPorConfirmar
+import pe.elfirme.caja.data.SERVIDOR_PREDETERMINADO
 import pe.elfirme.caja.data.Usuario
+import pe.elfirme.caja.data.codigoEmpresaValido
+import pe.elfirme.caja.data.servidorDeEmpresa
 
 @Composable
 fun Marca(modifier: Modifier = Modifier) {
     Column(modifier) {
         Box(Modifier.size(width = 48.dp, height = 8.dp).background(Senal))
         Spacer(Modifier.height(16.dp))
-        Text("El Firme", style = MaterialTheme.typography.headlineMedium.copy(fontSize = 44.sp, lineHeight = 48.sp))
-        Text("Caja y comprobantes", style = MaterialTheme.typography.bodyLarge, color = Firme.c.tintaSuave)
+        Text("Infosmart", style = MaterialTheme.typography.headlineMedium.copy(fontSize = 44.sp, lineHeight = 48.sp))
+        Text("Lavadero · caja y comprobantes", style = MaterialTheme.typography.bodyLarge, color = Firme.c.tintaSuave)
     }
 }
 
@@ -50,8 +53,10 @@ fun Marca(modifier: Modifier = Modifier) {
 fun PantallaAcceso(api: Api, onIngreso: (Usuario) -> Unit) {
     var usuario by remember { mutableStateOf("") }
     var clave by remember { mutableStateOf("") }
+    var empresa by remember { mutableStateOf(api.prefs.empresa) }
     var servidor by remember { mutableStateOf(api.prefs.servidor) }
-    var verServidor by remember { mutableStateOf(false) }
+    // Servidor propio (instalación local): solo si no se usa un código de empresa.
+    var verServidor by remember { mutableStateOf(api.prefs.empresa.isBlank() && api.prefs.servidor != SERVIDOR_PREDETERMINADO) }
     var error by remember { mutableStateOf<String?>(null) }
     var cargando by remember { mutableStateOf(false) }
     var huella by remember { mutableStateOf<String?>(null) }
@@ -62,7 +67,16 @@ fun PantallaAcceso(api: Api, onIngreso: (Usuario) -> Unit) {
             cargando = true
             error = null
             try {
-                api.prefs.servidor = servidor.trim()
+                val codigo = empresa.trim().lowercase()
+                if (verServidor && servidor.isNotBlank()) {
+                    api.prefs.empresa = ""
+                    api.prefs.servidor = servidor.trim()
+                } else if (codigoEmpresaValido(codigo)) {
+                    api.prefs.empresa = codigo
+                    api.prefs.servidor = servidorDeEmpresa(codigo)
+                } else {
+                    throw ErrorApi("Escribe el código de tu empresa, tal como te lo dio Infosmart.")
+                }
                 api.verificarServidor()
                 onIngreso(api.ingresar(usuario, clave))
             } catch (e: HuellaPorConfirmar) {
@@ -76,7 +90,7 @@ fun PantallaAcceso(api: Api, onIngreso: (Usuario) -> Unit) {
     }
 
     AccesoContenido(
-        usuario, { usuario = it }, clave, { clave = it }, servidor, { servidor = it },
+        empresa, { empresa = it }, usuario, { usuario = it }, clave, { clave = it }, servidor, { servidor = it },
         verServidor, { verServidor = !verServidor }, error, cargando, ::ingresar,
     )
 
@@ -100,6 +114,7 @@ fun PantallaAcceso(api: Api, onIngreso: (Usuario) -> Unit) {
 
 @Composable
 fun AccesoContenido(
+    empresa: String, onEmpresa: (String) -> Unit,
     usuario: String, onUsuario: (String) -> Unit,
     clave: String, onClave: (String) -> Unit,
     servidor: String, onServidor: (String) -> Unit,
@@ -113,13 +128,19 @@ fun AccesoContenido(
         Spacer(Modifier.height(40.dp))
         Marca()
         Spacer(Modifier.height(24.dp))
+        if (!verServidor) {
+            Campo(
+                empresa, { onEmpresa(it.trim().lowercase()) }, "Código de empresa", teclado = KeyboardType.Uri,
+                ayuda = "Te lo da Infosmart. Por ejemplo: miempresa",
+            )
+        }
         Campo(usuario, onUsuario, "Usuario")
         Campo(clave, onClave, "Clave", teclado = KeyboardType.Password, transformacion = PasswordVisualTransformation())
         error?.let { Aviso(it, Firme.c.rechazado) }
         BotonPrincipal("Ingresar", onIngresar, Modifier.fillMaxWidth(), cargando = cargando,
-            activo = usuario.isNotBlank() && clave.isNotBlank())
+            activo = usuario.isNotBlank() && clave.isNotBlank() && (verServidor || empresa.isNotBlank()))
         TextButton(onClick = onVerServidor, modifier = Modifier.align(Alignment.CenterHorizontally).height(48.dp)) {
-            Text(if (verServidor) "Ocultar servidor" else "Cambiar servidor", color = Firme.c.tintaSuave)
+            Text(if (verServidor) "Usar código de empresa" else "Usar un servidor propio", color = Firme.c.tintaSuave)
         }
         if (verServidor) Campo(servidor, onServidor, "Dirección del servidor", teclado = KeyboardType.Uri)
     }

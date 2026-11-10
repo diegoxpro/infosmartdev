@@ -81,7 +81,7 @@ class PantallasTest {
         ),
     )
 
-    @Test fun acceso() = lienzo { AccesoContenido("", {}, "", {}, "", {}, false, {}, null, false, {}) }
+    @Test fun acceso() = lienzo { AccesoContenido("", {}, "", {}, "", {}, "", {}, false, {}, null, false, {}) }
 
     private fun cajaUi() = @Composable { CajaContenido(dia, "Hoy · Lunes 9 de noviembre", false, {}, {}, {}, {}, {}, {}) }
     @Test fun caja() = lienzo(c = cajaUi())

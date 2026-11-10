@@ -48,6 +48,15 @@ val JSON = Json {
 
 const val SERVIDOR_PREDETERMINADO = "https://190.119.59.24:8443"
 
+/** Dominio y puerto de Infosmart: cada empresa entra por https://<código>.<DOMINIO_NUBE>. */
+const val DOMINIO_NUBE = "ciardi.lat:8093"
+
+private val CODIGO_EMPRESA = Regex("^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$")
+
+fun codigoEmpresaValido(codigo: String) = CODIGO_EMPRESA.matches(codigo)
+
+fun servidorDeEmpresa(codigo: String) = "https://${codigo.trim().lowercase()}.$DOMINIO_NUBE"
+
 class Preferencias(contexto: Context) {
     private val p: SharedPreferences = EncryptedSharedPreferences.create(
         contexto,
@@ -60,6 +69,10 @@ class Preferencias(contexto: Context) {
     var servidor: String
         get() = p.getString("servidor", SERVIDOR_PREDETERMINADO) ?: SERVIDOR_PREDETERMINADO
         set(v) = p.edit().putString("servidor", v).apply()
+    /** Código de empresa en Infosmart (su subdominio). Vacío cuando se usa un servidor propio. */
+    var empresa: String
+        get() = p.getString("empresa", "") ?: ""
+        set(v) = p.edit().putString("empresa", v).apply()
     var huella: String?
         get() = p.getString("huella", null)
         set(v) = p.edit().putString("huella", v).apply()

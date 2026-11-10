@@ -37,6 +37,27 @@ def cargar_bytes(contenido: bytes, clave: str) -> Certificado:
     return Certificado(llave, cert)
 
 
+_prueba: Certificado | None = None
+
+
+def certificado_prueba() -> Certificado:
+    """Certificado autofirmado para el ambiente beta de SUNAT, que no valida la cadena del firmante."""
+    global _prueba
+    if _prueba is None:
+        import datetime as dt
+
+        from cryptography.x509.oid import NameOID
+
+        llave = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        nombre = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "INFOSMART PRUEBAS")])
+        ahora = dt.datetime.now(dt.timezone.utc)
+        cert = (x509.CertificateBuilder().subject_name(nombre).issuer_name(nombre).public_key(llave.public_key())
+                .serial_number(x509.random_serial_number()).not_valid_before(ahora - dt.timedelta(days=1))
+                .not_valid_after(ahora + dt.timedelta(days=3650)).sign(llave, hashes.SHA256()))
+        _prueba = Certificado(llave, cert)
+    return _prueba
+
+
 def _ds(padre: etree._Element, nombre: str, texto: str | None = None, **attrs: str) -> etree._Element:
     nodo = etree.SubElement(padre, f"{{{NS_DS}}}{nombre}", attrs)
     if texto is not None:

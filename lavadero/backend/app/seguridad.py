@@ -9,6 +9,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 import jwt
 
 from .config import CFG
@@ -24,20 +25,30 @@ def hash_clave(clave: str) -> str:
 
 
 def verificar_clave(clave: str, almacenado: str) -> bool:
+    if almacenado.startswith("$2"):
+        # Hash bcrypt: la clave del administrador que genera el panel Infosmart.
+        try:
+            return bcrypt.checkpw(clave.encode()[:72], almacenado.encode())
+        except ValueError:
+            return False
     sal_b64, d_b64 = almacenado.split("$", 1)
     d = hashlib.scrypt(clave.encode(), salt=base64.b64decode(sal_b64), n=_N, r=_R, p=_P, maxmem=_MEM)
     return hmac.compare_digest(d, base64.b64decode(d_b64))
 
 
-def crear_token(usuario_id: int, version: int) -> str:
+def crear_token(usuario_id: int, version: int, empresa: str = "") -> str:
     ahora = datetime.now(timezone.utc)
-    return jwt.encode({"sub": str(usuario_id), "v": version, "exp": ahora + timedelta(days=30)},
-                      CFG.jwt_secreto, algorithm="HS256")
+    datos = {"sub": str(usuario_id), "v": version, "exp": ahora + timedelta(days=30)}
+    if empresa:
+        datos["emp"] = empresa  # modo nube: el token solo sirve en su empresa
+    return jwt.encode(datos, CFG.jwt_secreto, algorithm="HS256")
 
 
-def leer_token(token: str) -> tuple[int, int] | None:
+def leer_token(token: str, empresa: str = "") -> tuple[int, int] | None:
     try:
         datos = jwt.decode(token, CFG.jwt_secreto, algorithms=["HS256"])
+        if datos.get("emp", "") != empresa:
+            return None
         return int(datos["sub"]), int(datos["v"])
     except (jwt.PyJWTError, KeyError, ValueError):
         return None

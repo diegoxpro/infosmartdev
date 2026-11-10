@@ -33,7 +33,7 @@ export function AjustesProducto({ empresa, producto, volver }: { empresa: Empres
         <button className="enlace" onClick={volver}>← Volver a la empresa</button>
         {!a ? <p className="tenue">Cargando…</p> : (
           <>
-            <Sunat a={a} ruc={empresa.ruc} ocupado={ocupado} guardar={guardar}
+            <Sunat producto={producto} a={a} ruc={empresa.ruc} ocupado={ocupado} guardar={guardar}
               cargarCert={(archivo, clave) => tarea('cert', async () => {
                 const base64 = await leerBase64(archivo);
                 await api(`${ruta}/ajustes/certificado`, { metodo: 'POST', cuerpo: { archivo: base64, clave } });
@@ -60,8 +60,8 @@ function leerBase64(f: File) {
 
 type Guardar = (cuerpo: Record<string, unknown>, ok: string, nombre?: string) => Promise<void>;
 
-function Sunat({ a, ruc, ocupado, guardar, cargarCert }: {
-  a: Ajustes; ruc: string; ocupado: string; guardar: Guardar; cargarCert: (f: File, clave: string) => Promise<void>;
+function Sunat({ a, ruc, producto, ocupado, guardar, cargarCert }: {
+  a: Ajustes; ruc: string; producto: Producto; ocupado: string; guardar: Guardar; cargarCert: (f: File, clave: string) => Promise<void>;
 }) {
   const [archivo, setArchivo] = useState<File | null>(null);
   const [claveCert, setClaveCert] = useState('');
@@ -71,7 +71,10 @@ function Sunat({ a, ruc, ocupado, guardar, cargarCert }: {
 
   const cambiarModo = (modo: Ajustes['sunatModo']) => {
     if (modo === a.sunatModo) return;
-    if (modo === 'PRODUCCION' && !confirm('En producción los comprobantes se envían a SUNAT y son reales. ¿Activar producción?')) return;
+    const aviso = producto === 'LAVADERO'
+      ? 'En producción los comprobantes se envían a SUNAT y son reales. En el lavadero se borran las ventas y gastos de prueba y la numeración vuelve a empezar; no se puede deshacer. ¿Activar producción?'
+      : 'En producción los comprobantes se envían a SUNAT y son reales. ¿Activar producción?';
+    if (modo === 'PRODUCCION' && !confirm(aviso)) return;
     guardar({ sunatModo: modo }, `Facturación electrónica: ${MODOS[modo]}`, 'modo');
   };
 

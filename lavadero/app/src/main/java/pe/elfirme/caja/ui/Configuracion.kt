@@ -206,6 +206,15 @@ fun ConsultasContenido(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (d.nube) {
+                Aviso(
+                    if (d.activo) "La consulta en línea está activa. Infosmart administra el servicio."
+                    else "La consulta en línea no está activa. Pídela a Infosmart.",
+                    if (d.activo) Firme.c.aceptado else Firme.c.observado, titulo = "Consulta DNI y RUC",
+                )
+                mensaje?.let { (t, ok) -> Aviso(t, if (ok) Firme.c.aceptado else Firme.c.rechazado) }
+                return@Column
+            }
             Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Consulta en línea", style = MaterialTheme.typography.titleMedium)
@@ -232,7 +241,7 @@ fun ConsultasContenido(
         }
         Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             BotonSecundario("Probar", onProbar, Modifier.weight(1f), cargando = trabajando == "probar")
-            BotonPrincipal("Guardar", onGuardar, Modifier.weight(1f), cargando = trabajando == "guardar")
+            if (!d.nube) BotonPrincipal("Guardar", onGuardar, Modifier.weight(1f), cargando = trabajando == "guardar")
         }
     }
 }
@@ -370,6 +379,18 @@ fun ConfigSunatContenido(
         }
         mensaje?.let { (t, ok) -> Aviso(t, if (ok) Firme.c.aceptado else Firme.c.rechazado) }
 
+        if (d.nube) {
+            Text(
+                "Infosmart administra tu RUC, la clave SOL y el certificado digital. Para cambiarlos o pasar a producción, comunícate con Infosmart.",
+                style = MaterialTheme.typography.bodyMedium, color = Firme.c.tintaSuave,
+            )
+            Seccion("Datos de acceso", Modifier.padding(top = 8.dp))
+            Text("RUC ${d.ruc}" + if (d.usuario.isNotBlank()) " · usuario SOL ${d.usuario}" else "")
+            Seccion("Certificado digital (CDT)", Modifier.padding(top = 12.dp))
+            EstadoCertificado(d, "Infosmart aún no ha cargado tu certificado.")
+            return@Column
+        }
+
         Seccion("Datos de acceso", Modifier.padding(top = 8.dp))
         Campo(e.ruc, { v -> e.ruc = v.filter(Char::isDigit).take(11) }, "RUC de la empresa", teclado = KeyboardType.Number)
         Campo(e.usuario, { e.usuario = it.trim() }, "Usuario secundario SOL", mayusculas = true)
@@ -381,14 +402,7 @@ fun ConfigSunatContenido(
         BotonSecundario("Guardar datos", onGuardarDatos, Modifier.fillMaxWidth(), cargando = trabajando == "datos")
 
         Seccion("Certificado digital (CDT)", Modifier.padding(top = 12.dp))
-        val c = d.certificado
-        val vence = c.vence.split("-").reversed().joinToString("/")
-        when {
-            !c.cargado -> Text("Aún no has cargado tu certificado desde la app.", color = Firme.c.tintaSuave)
-            !c.valido -> Aviso("El certificado guardado no se puede abrir. Vuelve a cargarlo.", Firme.c.rechazado)
-            c.diasRestantes < 30 -> Aviso("Vence el $vence: quedan ${c.diasRestantes} días.", Firme.c.observado, titulo = "Renueva tu certificado")
-            else -> Aviso("Vence el $vence\n${c.titular}", Firme.c.aceptado, titulo = "Certificado vigente")
-        }
+        EstadoCertificado(d, "Aún no has cargado tu certificado desde la app.")
         BotonSecundario(if (e.archivo == null) "Elegir archivo .pfx o .p12" else "Archivo listo · elegir otro", onElegirArchivo, Modifier.fillMaxWidth())
         if (e.archivo != null) {
             Campo(
@@ -406,5 +420,17 @@ fun ConfigSunatContenido(
             )
             BotonSecundario("Activar producción", onActivar, Modifier.fillMaxWidth(), color = Firme.c.rechazado, cargando = trabajando == "activar")
         }
+    }
+}
+
+@Composable
+private fun EstadoCertificado(d: AjustesSunat, sinCertificado: String) {
+    val c = d.certificado
+    val vence = c.vence.split("-").reversed().joinToString("/")
+    when {
+        !c.cargado -> Text(sinCertificado, color = Firme.c.tintaSuave)
+        !c.valido -> Aviso("El certificado guardado no se puede abrir. Vuelve a cargarlo.", Firme.c.rechazado)
+        c.diasRestantes < 30 -> Aviso("Vence el $vence: quedan ${c.diasRestantes} días.", Firme.c.observado, titulo = "Renueva tu certificado")
+        else -> Aviso("Vence el $vence\n${c.titular}", Firme.c.aceptado, titulo = "Certificado vigente")
     }
 }

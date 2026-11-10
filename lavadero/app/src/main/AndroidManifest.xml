@@ -14,7 +14,7 @@
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
-        android:label="El Firme"
+        android:label="Infosmart Lavadero"
         android:supportsRtl="false"
         android:theme="@style/Tema.ElFirme">
 

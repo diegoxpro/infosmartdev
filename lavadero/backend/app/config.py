@@ -24,6 +24,12 @@ class Config:
     admin_clave: str
     intervalo_worker_s: int
     clave_cifrado: str
+    # Modo nube (Infosmart): con PANEL_URL cada subdominio es una empresa con su propia base.
+    panel_url: str
+    clave_interna: str
+    empresa_database_url: str  # plantilla con {db}
+    dominio_base: str
+    panel_cache_s: int
 
 
 def cargar() -> Config:
@@ -41,6 +47,11 @@ def cargar() -> Config:
         admin_clave=e("ADMIN_CLAVE", ""),
         intervalo_worker_s=int(e("INTERVALO_WORKER_S", "60")),
         clave_cifrado=e("CLAVE_CIFRADO", ""),
+        panel_url=e("PANEL_URL", "").rstrip("/"),
+        clave_interna=e("CLAVE_INTERNA", ""),
+        empresa_database_url=e("EMPRESA_DATABASE_URL", ""),
+        dominio_base=e("DOMINIO_BASE", "").lower(),
+        panel_cache_s=int(e("PANEL_CACHE_S", "30")),
     )
 
 
