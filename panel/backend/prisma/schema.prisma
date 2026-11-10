@@ -1,0 +1,87 @@
+// Base de control del panel Infosmart: empresas clientes, sus productos y planes.
+// Cada producto de cada empresa tiene su propia base de datos (ver baseDatos).
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum EstadoEmpresa {
+  PRUEBA
+  ACTIVA
+  SUSPENDIDA
+}
+
+enum Producto {
+  VENTAS
+  LAVADERO
+}
+
+model Superadmin {
+  id        Int      @id @default(autoincrement())
+  usuario   String   @unique
+  nombre    String
+  claveHash String
+  creadoEl  DateTime @default(now())
+}
+
+model Plan {
+  id           Int       @id @default(autoincrement())
+  codigo       String    @unique
+  nombre       String
+  precioMensual Decimal  @db.Decimal(10, 2)
+  maxUsuarios  Int       @default(3)
+  activo       Boolean   @default(true)
+  empresas     Empresa[]
+}
+
+model Empresa {
+  id          Int               @id @default(autoincrement())
+  razonSocial String
+  ruc         String            @unique
+  subdominio  String            @unique
+  contacto    String?
+  telefono    String?
+  correo      String?
+  estado      EstadoEmpresa     @default(PRUEBA)
+  planId      Int
+  plan        Plan              @relation(fields: [planId], references: [id])
+  venceEl     DateTime
+  notas       String?
+  creadoEl    DateTime          @default(now())
+  productos   ProductoEmpresa[]
+  eventos     Evento[]
+}
+
+model ProductoEmpresa {
+  id                 Int      @id @default(autoincrement())
+  empresaId          Int
+  empresa            Empresa  @relation(fields: [empresaId], references: [id])
+  producto           Producto
+  baseDatos          String   @unique
+  adminUsuario       String
+  adminClaveHash     String
+  // true mientras el administrador no cambie la clave temporal que le dio Infosmart
+  adminClaveTemporal Boolean  @default(true)
+  // true cuando el producto ya corrió sus migraciones y creó al administrador en su base
+  aprovisionado      Boolean  @default(false)
+  creadoEl           DateTime @default(now())
+
+  @@unique([empresaId, producto])
+}
+
+model Evento {
+  id        Int      @id @default(autoincrement())
+  empresaId Int?
+  empresa   Empresa? @relation(fields: [empresaId], references: [id])
+  tipo      String
+  detalle   String?
+  usuario   String?
+  creadoEl  DateTime @default(now())
+
+  @@index([empresaId, creadoEl])
+}
