@@ -1,6 +1,7 @@
 import { createServer as crearHttp, IncomingMessage, ServerResponse } from 'http';
 import { createServer as crearHttps, Server } from 'https';
 import { asegurarCertificados, caPem, ipPrincipal, ipsLocales, puertos } from './certificados';
+import { NUBE, urlPublica } from '../nube/contexto';
 
 type Manejador = (req: IncomingMessage, res: ServerResponse) => void;
 
@@ -57,10 +58,12 @@ export function abrirRedLocal(app: Manejador) {
 }
 
 export function urlHttps(ruta = '') {
+  if (NUBE) return urlPublica(ruta);
   return `https://${ipPrincipal()}:${puertos.https}${ruta}`;
 }
 
 export function urlEntrada(ruta = '') {
+  if (NUBE) return urlPublica(ruta);
   return `http://${ipPrincipal()}:${puertos.http}${ruta}`;
 }
 

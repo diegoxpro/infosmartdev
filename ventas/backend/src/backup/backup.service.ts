@@ -4,6 +4,8 @@ import { copyFile, mkdir, readdir, stat, unlink } from 'fs/promises';
 import { join, resolve } from 'path';
 import { promisify } from 'util';
 import { ConfiguracionService } from '../configuracion/configuracion.service';
+import { inquilinoActual, NUBE } from '../nube/contexto';
+import { panel } from '../nube/panel';
 import { PrismaService } from '../prisma/prisma.service';
 
 const ejecutar = promisify(execFile);
@@ -27,7 +29,8 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    if (process.env.BACKUP_AUTOMATICO === '0') return;
+    // En la nube los backups los hace y guarda el panel Infosmart.
+    if (NUBE || process.env.BACKUP_AUTOMATICO === '0') return;
     // Revisa cada 5 minutos si ya toca el backup del día (también recupera el
     // de un día en que la PC estuvo apagada a esa hora).
     this.reloj = setInterval(() => this.revisarProgramado().catch((e) => this.log.error(e.message)), 5 * 60_000);
@@ -49,6 +52,12 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
 
   /** Hace un backup; si ya hay uno en curso, espera ese. */
   hacer(origen: 'programado' | 'manual' | 'cierre de caja') {
+    if (NUBE) {
+      const sub = inquilinoActual()?.subdominio;
+      if (!sub) return Promise.resolve(null);
+      // El panel lo hace en segundo plano; un fallo aquí no debe frenar el cierre de caja.
+      return panel.pedirRespaldo(sub, origen).catch((e) => this.log.warn(`Backup ${origen}: ${(e as Error).message}`));
+    }
     this.enCurso ??= this.ejecutarBackup(origen).finally(() => (this.enCurso = null));
     return this.enCurso;
   }
@@ -94,6 +103,7 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
   }
 
   async estado() {
+    if (NUBE) return { nube: true, carpeta: null, carpetaLocal: null, hora: null, conservar: null, ultimoOk: null, atrasado: false, historial: [] };
     const cfg = await this.config.obtener();
     const [ultimoOk, historial] = await Promise.all([
       this.prisma.backup.findFirst({ where: { ok: true }, orderBy: { id: 'desc' } }),

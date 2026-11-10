@@ -4,7 +4,9 @@ import * as bcrypt from 'bcryptjs';
 import { IsBoolean, IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString, Matches, MinLength, ValidateIf } from 'class-validator';
 import { Permiso, UsuarioActual, UsuarioSesion } from '../auth/decorators';
 import { esPermiso, PERMISOS, PERMISOS_ASIGNABLES } from '../auth/permisos';
+import { AuthService } from '../auth/auth.service';
 import { PermisosService } from '../auth/permisos.service';
+import { inquilinoActual, NUBE } from '../nube/contexto';
 import { PrismaService } from '../prisma/prisma.service';
 
 class CrearUsuarioDto {
@@ -50,7 +52,17 @@ export class UsuariosController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly permisos: PermisosService,
+    private readonly auth: AuthService,
   ) {}
+
+  /** En la nube el plan de Infosmart fija cuántos usuarios activos puede tener la empresa. */
+  private async revisarLimite(tx: { usuario: { count: PrismaService['usuario']['count'] } } = this.prisma) {
+    const max = NUBE ? inquilinoActual()?.info.plan.maxUsuarios : undefined;
+    if (!max) return;
+    if ((await tx.usuario.count({ where: { activo: true } })) >= max) {
+      throw new BadRequestException(`Tu plan permite ${max} usuarios activos. Desactiva uno o pide a Infosmart un plan mayor.`);
+    }
+  }
 
   @Get()
   async listar() {
@@ -73,6 +85,7 @@ export class UsuariosController {
       throw new BadRequestException('Ese usuario ya existe');
     }
     const perfilId = dto.rol === Rol.ADMIN ? null : await this.perfilValido(dto.perfilId);
+    await this.revisarLimite();
     return this.prisma.usuario.create({
       data: { usuario, nombre: dto.nombre, rol: dto.rol, perfilId, passwordHash: await bcrypt.hash(dto.password, 10) },
       select: campos,
@@ -88,13 +101,14 @@ export class UsuariosController {
     if (id === yo.id && (dto.activo === false || (dto.rol && dto.rol !== Rol.ADMIN))) {
       throw new BadRequestException('No puedes desactivarte ni quitarte el rol de administrador');
     }
-    const antes = await this.prisma.usuario.findUnique({ where: { id }, select: { rol: true, perfilId: true, perfil: { select: { nombre: true } } } });
+    const antes = await this.prisma.usuario.findUnique({ where: { id }, select: { rol: true, perfilId: true, activo: true, perfil: { select: { nombre: true } } } });
     if (!antes) throw new NotFoundException('Usuario no encontrado');
+    if (dto.activo === true && !antes.activo) await this.revisarLimite();
     const { password, perfilId: pedido, ...resto } = dto;
     const rol = dto.rol ?? antes.rol;
     const perfilId = rol === Rol.ADMIN ? null : await this.perfilValido(pedido ?? antes.perfilId ?? undefined);
 
-    return this.prisma.$transaction(async (tx) => {
+    const resultado = await this.prisma.$transaction(async (tx) => {
       const u = await tx.usuario.update({
         where: { id },
         data: { ...resto, perfilId, ...(password ? { passwordHash: await bcrypt.hash(password, 10) } : {}) },
@@ -113,6 +127,8 @@ export class UsuariosController {
       }
       return u;
     });
+    if (password) await this.auth.avisarClaveAdmin(resultado.usuario);
+    return resultado;
   }
 
   /** Permisos de un usuario: los de su rol, sus cambios y el resultado. */

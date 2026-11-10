@@ -1,6 +1,9 @@
 import { BadRequestException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
+import { inquilinoActual, NUBE } from '../nube/contexto';
+import { panel } from '../nube/panel';
+import { registro } from '../nube/registro';
 import { PrismaService } from '../prisma/prisma.service';
 import { PERMISOS } from './permisos';
 import { PermisosService } from './permisos.service';
@@ -18,7 +21,9 @@ export class AuthService {
     if (!u || !u.activo || !(await bcrypt.compare(password, u.passwordHash))) {
       throw new UnauthorizedException('Usuario o contraseña incorrectos');
     }
-    const token = await this.jwt.signAsync({ sub: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol });
+    // En la nube el token lleva la empresa: no sirve en el subdominio de otra.
+    const emp = inquilinoActual()?.subdominio;
+    const token = await this.jwt.signAsync({ sub: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, ...(emp && { emp }) });
     return { token, usuario: await this.yo(u.id) };
   }
 
@@ -57,6 +62,15 @@ export class AuthService {
       throw new BadRequestException('La contraseña actual no es correcta');
     }
     await this.prisma.usuario.update({ where: { id }, data: { passwordHash: await bcrypt.hash(nueva, 10) } });
+    await this.avisarClaveAdmin(u.usuario);
     return { ok: true };
+  }
+
+  /** En la nube: si el administrador de Infosmart cambió su clave temporal, se avisa al panel. */
+  async avisarClaveAdmin(usuario: string) {
+    const i = inquilinoActual();
+    if (!NUBE || !i || usuario !== i.info.admin.usuario.toLowerCase()) return;
+    await panel.reportar(i.subdominio, { claveCambiada: true }).catch(() => undefined);
+    registro.olvidar(i.subdominio);
   }
 }

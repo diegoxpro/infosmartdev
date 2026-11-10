@@ -1,6 +1,9 @@
 import { BadRequestException, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { EstadoSunat, ModoSunat, Prisma, TipoComprobante } from '@prisma/client';
+import { createHash } from 'crypto';
 import { ConfiguracionService } from '../configuracion/configuracion.service';
+import { NUBE, PorEmpresa } from '../nube/contexto';
+import { registro } from '../nube/registro';
 import { PrismaService } from '../prisma/prisma.service';
 import { Certificado, leerPfx } from './certificado';
 import { firmarXml } from './firma';
@@ -20,10 +23,13 @@ const ventaXml = {
 export class SunatService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('SUNAT');
   private reloj?: NodeJS.Timeout;
-  private procesando: Promise<unknown> | null = null;
-  // Correcciones de ventas en curso: mientras haya alguna, la cola no envía.
-  private pausas = 0;
-  private cert: Certificado | null = null;
+  // Cola, pausas y certificado van por empresa: en la nube un mismo proceso atiende a varias.
+  private readonly cola = new PorEmpresa(() => ({
+    procesando: null as Promise<unknown> | null,
+    // Correcciones de ventas en curso: mientras haya alguna, la cola no envía.
+    pausas: 0,
+    cert: null as { huella: string; cert: Certificado } | null,
+  }));
 
   constructor(
     private readonly prisma: PrismaService,
@@ -32,7 +38,10 @@ export class SunatService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit() {
     if (process.env.SUNAT_AUTOMATICO === '0') return;
-    this.reloj = setInterval(() => void this.procesar(), 2 * 60_000);
+    this.reloj = setInterval(
+      () => void (NUBE ? registro.paraCadaEmpresa('SUNAT', () => this.procesar()) : this.procesar()),
+      2 * 60_000,
+    );
   }
 
   onModuleDestroy() {
@@ -68,12 +77,16 @@ export class SunatService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async certificado(): Promise<Certificado> {
-    if (this.cert) return this.cert;
     const pfx = await leerCertificado();
-    if (!pfx) throw new BadRequestException('Carga el certificado digital en Configuración → SUNAT');
+    if (!pfx) {
+      throw new BadRequestException(NUBE ? 'Infosmart aún no cargó el certificado digital de tu empresa' : 'Carga el certificado digital en Configuración → SUNAT');
+    }
     const { certificadoClave } = await leerClaves();
-    this.cert = leerPfx(pfx, certificadoClave ?? '');
-    return this.cert;
+    // Si el panel cambia el certificado, la huella cambia y se vuelve a leer.
+    const huella = createHash('sha256').update(pfx).update(certificadoClave ?? '').digest('hex');
+    const c = this.cola.actual;
+    if (c.cert?.huella !== huella) c.cert = { huella, cert: leerPfx(pfx, certificadoClave ?? '') };
+    return c.cert.cert;
   }
 
   private async credenciales(): Promise<Credenciales> {
@@ -92,7 +105,7 @@ export class SunatService implements OnModuleInit, OnModuleDestroy {
     const cert = leerPfx(pfx, clave); // valida antes de guardar
     await guardarCertificado(pfx);
     await guardarClaves({ certificadoClave: clave });
-    this.cert = cert;
+    this.cola.actual.cert = { huella: createHash('sha256').update(pfx).update(clave).digest('hex'), cert };
     return this.estado();
   }
 
@@ -122,6 +135,8 @@ export class SunatService implements OnModuleInit, OnModuleDestroy {
       }),
     ]);
     return {
+      // En la nube el modo, el certificado y la clave SOL los maneja Infosmart.
+      nube: NUBE,
       modo: c.sunatModo,
       certificado,
       errorCertificado,
@@ -309,11 +324,12 @@ export class SunatService implements OnModuleInit, OnModuleDestroy {
 
   /** Envía lo pendiente. Lo llama el reloj cada 2 minutos y el botón "Enviar ahora". */
   procesar() {
-    if (this.pausas) return Promise.resolve();
-    this.procesando ??= this.procesarCola()
+    const c = this.cola.actual;
+    if (c.pausas) return Promise.resolve();
+    c.procesando ??= this.procesarCola()
       .catch((e) => this.log.warn((e as Error).message))
-      .finally(() => (this.procesando = null));
-    return this.procesando;
+      .finally(() => (c.procesando = null));
+    return c.procesando;
   }
 
   private async procesarCola() {
@@ -337,12 +353,13 @@ export class SunatService implements OnModuleInit, OnModuleDestroy {
    * salga a SUNAT a medio cambiar. Si había un envío en curso, primero espera que termine.
    */
   async sinEnvios<T>(fn: () => Promise<T>): Promise<T> {
-    this.pausas++;
+    const c = this.cola.actual;
+    c.pausas++;
     try {
-      await this.procesando;
+      await c.procesando;
       return await fn();
     } finally {
-      this.pausas--;
+      c.pausas--;
     }
   }
 

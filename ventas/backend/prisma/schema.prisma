@@ -5,7 +5,7 @@
 generator client {
   provider      = "prisma-client-js"
   // "windows" para armar el instalador de la tienda desde cualquier PC.
-  binaryTargets = ["native", "windows"]
+  binaryTargets = ["native", "windows", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -130,6 +130,8 @@ model Configuracion {
   consultaDocToken      String?
   // IP de esta PC en el WiFi para los celulares (QR del inventario). 'auto' = detectarla sola; vacío = RED_IP del .env o detectarla.
   redIp                 String?
+  // Modo nube: hash de la última clave de administrador recibida del panel Infosmart.
+  nubeAdminHash         String?
   updatedAt             DateTime  @updatedAt
 }
 

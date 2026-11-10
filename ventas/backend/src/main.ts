@@ -7,11 +7,18 @@ import { AppModule } from './app.module';
 import { ConfiguracionService } from './configuracion/configuracion.service';
 import { fijarIpConfigurada } from './red/certificados';
 import { abrirRedLocal } from './red/servidor-red';
+import { NUBE } from './nube/contexto';
+import { middlewareEmpresa } from './nube/middleware';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   // El certificado .pfx y el Excel de productos llegan en base64 dentro del JSON.
   app.useBodyParser('json', { limit: '20mb' });
+  // Modo nube: cada petición se atiende con la empresa de su subdominio.
+  if (NUBE) {
+    app.set('trust proxy', true);
+    app.use(middlewareEmpresa);
+  }
   app.setGlobalPrefix('api');
   app.enableCors();
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
@@ -23,6 +30,8 @@ async function bootstrap() {
   console.log(`API lista en http://localhost:${port}/api`);
   // Celulares de la red local (inventario): HTTPS con la CA propia de la PC.
   // La IP elegida en Configuración › Red local manda sobre RED_IP y la detectada.
+  // En la nube los celulares entran por el subdominio con HTTPS: no hace falta la red local.
+  if (NUBE) return;
   fijarIpConfigurada((await app.get(ConfiguracionService).obtener()).redIp);
   abrirRedLocal(app.getHttpAdapter().getInstance());
 }

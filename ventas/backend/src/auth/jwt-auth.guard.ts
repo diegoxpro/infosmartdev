@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
+import { inquilinoActual, NUBE } from '../nube/contexto';
 import { PUBLICO } from './decorators';
 
 @Injectable()
@@ -19,6 +20,7 @@ export class JwtAuthGuard implements CanActivate {
     if (tipo !== 'Bearer' || !token) throw new UnauthorizedException('Inicia sesión');
     try {
       const payload = await this.jwt.verifyAsync(token);
+      if (NUBE && payload.emp !== inquilinoActual()?.subdominio) throw new Error('Token de otra empresa');
       req.user = { id: payload.sub, usuario: payload.usuario, nombre: payload.nombre, rol: payload.rol };
       return true;
     } catch {

@@ -177,6 +177,8 @@ export interface Sugerencia {
 export interface Configuracion {
   /** El token no llega al navegador: solo si está puesto. */
   consultaDocConfigurada?: boolean;
+  /** Modo nube (Infosmart): SUNAT, consulta DNI/RUC, backups y red local los administra el panel. */
+  nube?: { empresa: string | null; vence: string | null; plan: string | null } | null;
   empresaNombre: string;
   empresaRuc: string | null;
   empresaDireccion: string | null;

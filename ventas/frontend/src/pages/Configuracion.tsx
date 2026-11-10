@@ -26,9 +26,13 @@ const PESTANAS: { id: Pestana; titulo: string; permiso?: ClavePermiso }[] = [
 /** ¿Tiene alguna pestaña de configuración además de su contraseña? */
 export const veConfiguracion = (puede: (p: ClavePermiso) => boolean) => PESTANAS.some((p) => p.permiso && puede(p.permiso));
 
+/** En la nube los backups y la red local los maneja Infosmart. */
+const SOLO_TIENDA: Pestana[] = ['backup', 'red'];
+
 export default function Configuracion() {
   const { puede } = useAuth();
-  const visibles = PESTANAS.filter((p) => !p.permiso || puede(p.permiso));
+  const { data: cfg } = useCarga(() => api<Config>('/configuracion'), []);
+  const visibles = PESTANAS.filter((p) => (!p.permiso || puede(p.permiso)) && !(cfg?.nube && SOLO_TIENDA.includes(p.id)));
   const [elegida, setTab] = useState<Pestana>(visibles[0].id);
   // Si pierde el permiso de la pestaña abierta, pasa a la primera que le quede.
   const tab = visibles.some((p) => p.id === elegida) ? elegida : visibles[0].id;
@@ -160,7 +164,23 @@ function Preferencias() {
         </div>
       </div>
       <div><button className="btn btn-primary" onClick={guardar}>Guardar preferencias</button></div>
-      <ConsultaDocumentos configurada={!!data.consultaDocConfigurada} />
+      {data.nube ? <AdministradoPorInfosmart consulta={!!data.consultaDocConfigurada} /> : <ConsultaDocumentos configurada={!!data.consultaDocConfigurada} />}
+    </div>
+  );
+}
+
+/** En la nube la consulta DNI/RUC, los backups y SUNAT se contratan y configuran con Infosmart. */
+function AdministradoPorInfosmart({ consulta }: { consulta: boolean }) {
+  return (
+    <div className="card card-pad stack">
+      <h2>Servicios de Infosmart</h2>
+      <p className="muted small" style={{ margin: 0 }}>
+        La consulta de DNI y RUC, el certificado y la clave SOL para SUNAT y las copias de seguridad diarias de tus datos los administra Infosmart.
+        Para cambiarlos, comunícate con Infosmart.
+      </p>
+      <span className={`badge ${consulta ? 'ok' : ''}`} style={{ alignSelf: 'flex-start' }}>
+        {consulta ? 'Consulta DNI y RUC activa' : 'Consulta DNI y RUC sin contratar: solo búsqueda en clientes guardados'}
+      </span>
     </div>
   );
 }
@@ -314,6 +334,7 @@ function Sunat() {
     if (estado?.solUsuario) setSol((s) => ({ ...s, usuario: s.usuario || estado.solUsuario! }));
   }, [estado]);
   if (!f || !estado) return null;
+  const nube = !!cfg?.nube;
 
   const tarea = async (nombre: string, fn: () => Promise<void>) => {
     setOcupado(nombre);
@@ -329,12 +350,11 @@ function Sunat() {
   const guardar = () =>
     tarea('guardar', async () => {
       const { sunatModo, ...emisor } = f;
-      if (sunatModo === 'PRODUCCION' && !estado.solConfigurado) throw new Error('Para producción primero guarda el usuario SOL secundario');
-      if (sunatModo !== 'DESACTIVADO' && !estado.certificado) throw new Error('Primero carga el certificado digital');
-      await api('/configuracion', {
-        method: 'PATCH',
-        body: { ...Object.fromEntries(Object.entries(emisor).map(([k, v]) => [k, v.trim()])), sunatModo },
-      });
+      if (!nube && sunatModo === 'PRODUCCION' && !estado.solConfigurado) throw new Error('Para producción primero guarda el usuario SOL secundario');
+      if (!nube && sunatModo !== 'DESACTIVADO' && !estado.certificado) throw new Error('Primero carga el certificado digital');
+      // En la nube el modo y el RUC los fija Infosmart.
+      const datos = Object.fromEntries(Object.entries(emisor).filter(([k]) => !nube || k !== 'empresaRuc').map(([k, v]) => [k, v.trim()]));
+      await api('/configuracion', { method: 'PATCH', body: nube ? datos : { ...datos, sunatModo } });
       setEstado(await api<EstadoSunatGeneral>('/sunat/estado'));
       avisar('Datos de SUNAT guardados');
     });
@@ -385,6 +405,12 @@ function Sunat() {
             2 minutos. Las boletas libres (L001) nunca se envían.
           </p>
         </div>
+        {nube ? (
+          <div className="alert info">
+            Modo: <b>{f.sunatModo === 'PRODUCCION' ? 'Producción (boletas reales)' : f.sunatModo === 'BETA' ? 'Pruebas (SUNAT beta, sin validez)' : 'Desactivado'}</b>.
+            {' '}El modo, el certificado digital y el usuario SOL los administra Infosmart.
+          </div>
+        ) : (
         <Campo label="Modo">
           <select value={f.sunatModo} onChange={(e) => setF({ ...f, sunatModo: e.target.value as Config['sunatModo'] })} style={{ maxWidth: 360 }}>
             <option value="DESACTIVADO">Desactivado (no se envía nada)</option>
@@ -392,6 +418,7 @@ function Sunat() {
             <option value="PRODUCCION">Producción (boletas reales)</option>
           </select>
         </Campo>
+        )}
         {conteo.length > 0 && (
           <div className="row small" style={{ gap: 8 }}>
             {conteo.map(([k, v]) => (
@@ -410,6 +437,7 @@ function Sunat() {
               <input
                 className={k === 'empresaRuc' || k === 'empresaUbigeo' || k === 'codigoEstablecimiento' ? 'mono' : ''}
                 value={f[k]}
+                disabled={nube && k === 'empresaRuc'}
                 placeholder={ejemplo}
                 maxLength={k === 'empresaRuc' ? 11 : k === 'empresaUbigeo' ? 6 : k === 'codigoEstablecimiento' ? 4 : undefined}
                 onChange={(e) => setF({ ...f, [k]: e.target.value })}
@@ -426,8 +454,14 @@ function Sunat() {
         <div>
           <h2>Certificado digital</h2>
           <p className="muted small" style={{ margin: '4px 0 0' }}>
-            Se guarda solo en esta PC, en la carpeta <span className="mono">backend/secretos</span>. No va a la base de datos ni a los backups: guarda tu
-            .pfx original en un lugar seguro.
+            {nube ? (
+              'Infosmart guarda tu certificado cifrado y lo renueva contigo cuando se acerca su vencimiento.'
+            ) : (
+              <>
+                Se guarda solo en esta PC, en la carpeta <span className="mono">backend/secretos</span>. No va a la base de datos ni a los backups: guarda tu
+                .pfx original en un lugar seguro.
+              </>
+            )}
           </p>
         </div>
         {estado.certificado ? (
@@ -443,6 +477,7 @@ function Sunat() {
         ) : (
           <div className="alert warn">{estado.errorCertificado ?? 'Aún no hay certificado cargado.'}</div>
         )}
+        {!nube && (
         <div className="grid-2">
           <Campo label="Archivo .pfx o .p12">
             <input type="file" accept=".pfx,.p12" onChange={(e) => setArchivo(e.target.files?.[0] ?? null)} />
@@ -451,14 +486,16 @@ function Sunat() {
             <input type="password" autoComplete="off" value={claveCert} onChange={(e) => setClaveCert(e.target.value)} />
           </Campo>
         </div>
+        )}
         <div className="row">
-          <button className="btn" onClick={subirCertificado} disabled={!!ocupado || !archivo}>{ocupado === 'cert' ? 'Cargando…' : 'Cargar certificado'}</button>
+          {!nube && <button className="btn" onClick={subirCertificado} disabled={!!ocupado || !archivo}>{ocupado === 'cert' ? 'Cargando…' : 'Cargar certificado'}</button>}
           <button className="btn" onClick={probar} disabled={!!ocupado || !estado.certificado}>{ocupado === 'beta' ? 'Probando…' : 'Probar con SUNAT beta'}</button>
         </div>
         <p className="small muted" style={{ margin: 0 }}>
           La prueba firma una boleta de S/ 1.00 y la envía al entorno beta de SUNAT (no tiene validez). Necesita internet y el RUC guardado arriba.
         </p>
       </div>
+      {!nube && (
       <div className="card card-pad stack">
         <div>
           <h2>Usuario SOL secundario</h2>
@@ -476,6 +513,7 @@ function Sunat() {
         </div>
         <div><button className="btn" onClick={guardarSol} disabled={!!ocupado || !sol.usuario.trim()}>Guardar usuario SOL</button></div>
       </div>
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { Body, Controller, Get, Patch } from '@nestjs/common';
 import { ModoSunat } from '@prisma/client';
 import { IsBoolean, IsEnum, IsInt, IsNumber, IsOptional, IsString, Matches, Max, Min } from 'class-validator';
 import { Permiso } from '../auth/decorators';
+import { inquilinoActual, NUBE } from '../nube/contexto';
 import { ConfiguracionService } from './configuracion.service';
 
 class ActualizarConfiguracionDto {
@@ -33,7 +34,13 @@ class ActualizarConfiguracionDto {
 
 /** El token de consulta DNI/RUC no sale del servidor: solo se informa si está puesto. */
 function publica<T extends { consultaDocToken: string | null }>({ consultaDocToken, ...resto }: T) {
-  return { ...resto, consultaDocConfigurada: !!consultaDocToken };
+  const i = inquilinoActual();
+  return {
+    ...resto,
+    consultaDocConfigurada: !!consultaDocToken,
+    // En la nube el frontend oculta lo que administra Infosmart (SUNAT, consulta DNI/RUC, backup, red local).
+    nube: NUBE ? { empresa: i?.info.empresa.razonSocial ?? null, vence: i?.info.empresa.venceEl ?? null, plan: i?.info.plan.codigo ?? null } : null,
+  };
 }
 
 @Controller('configuracion')

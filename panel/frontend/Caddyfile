@@ -1,13 +1,31 @@
-# Para pruebas se sirve por HTTP en un puerto. Con el dominio real (admin.infosmart.pe)
-# este bloque pasa al proxy principal con HTTPS (ver deploy/README).
+# Entrada única por HTTP (pruebas). Con el dominio real (*.infosmart.pe) se pone
+# HTTPS con certificado comodín delante de este bloque (ver README, fase 4).
+{
+	auto_https off
+}
+
 :80 {
 	encode gzip
-	handle /api/* {
-		reverse_proxy panel-api:3100
+
+	# La API interna solo se usa dentro de Docker (ventas → panel)
+	@interno path /api/interno/*
+	respond @interno 404
+
+	# Panel Infosmart: admin.<dominio>, o la IP sola (http://190.119.59.24:8092)
+	@panel host admin.{$DOMINIO_BASE} {$IP_PANEL} localhost
+	handle @panel {
+		handle /api/* {
+			reverse_proxy panel-api:3100
+		}
+		handle {
+			root * /srv/panel
+			try_files {path} /index.html
+			file_server
+		}
 	}
+
+	# Cualquier otro subdominio es una empresa: sistema de ventas
 	handle {
-		root * /srv/panel
-		try_files {path} /index.html
-		file_server
+		reverse_proxy ventas:3000
 	}
 }
