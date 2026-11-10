@@ -1,0 +1,929 @@
+// Base de datos del sistema de ventas Candy's Market.
+// Fase 1: usuarios, configuración, productos, proveedores, compras,
+// cuentas por pagar, lotes/vencimientos, mermas y movimientos de stock.
+
+generator client {
+  provider      = "prisma-client-js"
+  // "windows" para armar el instalador de la tienda desde cualquier PC.
+  binaryTargets = ["native", "windows", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Rol {
+  ADMIN
+  CAJERO
+}
+
+enum AfectacionIgv {
+  GRAVADO
+  EXONERADO
+  INAFECTO
+}
+
+enum TipoMovimiento {
+  IMPORTACION
+  COMPRA
+  ANULACION_COMPRA
+  VENTA
+  ANULACION_VENTA
+  MERMA
+  AJUSTE
+  INVENTARIO
+}
+
+enum TipoDocumentoCompra {
+  FACTURA
+  BOLETA
+  GUIA
+  NOTA_VENTA
+}
+
+enum CondicionPago {
+  CONTADO
+  CREDITO
+}
+
+enum EstadoCompra {
+  REGISTRADA
+  ANULADA
+}
+
+enum MedioPago {
+  EFECTIVO
+  TARJETA
+  YAPE
+  PLIN
+  TRANSFERENCIA
+}
+
+model Usuario {
+  id           Int      @id @default(autoincrement())
+  usuario      String   @unique
+  nombre       String
+  passwordHash String
+  // ADMIN = administrador fijo con todo. CAJERO = personal: sus permisos
+  // salen de su rol (perfil) más los cambios propios del usuario.
+  rol          Rol      @default(CAJERO)
+  perfilId     Int?
+  activo       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  perfil               Perfil?              @relation(fields: [perfilId], references: [id])
+  permisos             PermisoUsuario[]     @relation("PermisoUsuario")
+  permisosDados        PermisoUsuario[]     @relation("PermisoDadoPor")
+  historialPermisos    PermisoHistorial[]   @relation("HistorialUsuario")
+  cambiosPermisos      PermisoHistorial[]   @relation("HistorialHechoPor")
+  movimientos          MovimientoStock[]
+  compras              Compra[]
+  pagos                PagoProveedor[]
+  ventas               Venta[]              @relation("VentaUsuario")
+  ventasAnuladas       Venta[]              @relation("VentaAnulador")
+  edicionesVenta       VentaEdicion[]
+  ventasAutorizadas    Venta[]              @relation("VentaAutorizador")
+  cajasAbiertas        Caja[]               @relation("CajaApertura")
+  inventarios          Inventario[]
+  operadoresInventario InventarioOperador[]
+  cajasCerradas        Caja[]               @relation("CajaCierre")
+  movimientosCaja      MovimientoCaja[]
+  gastos               Gasto[]              @relation("GastoUsuario")
+  gastosAnulados       Gasto[]              @relation("GastoAnulador")
+  movimientosFondo     MovimientoFondo[]
+  conteosFondo         ConteoFondo[]
+}
+
+// Fila única (id = 1) con los datos de la tienda y las preferencias.
+model Configuracion {
+  id                    Int       @id @default(1)
+  empresaNombre         String    @default("CANDY'S MARKET")
+  empresaRuc            String?
+  empresaDireccion      String?
+  permitirVentaSinStock Boolean   @default(false)
+  // Margen de ganancia por defecto (%) sobre el costo para cada precio.
+  margen1               Decimal   @default(25) @db.Decimal(6, 2)
+  margen2               Decimal   @default(20) @db.Decimal(6, 2)
+  margen3               Decimal   @default(15) @db.Decimal(6, 2)
+  // Los precios sugeridos se redondean hacia arriba a este múltiplo (S/ 0.10).
+  redondeoPrecio        Decimal   @default(0.10) @db.Decimal(6, 2)
+  diasAvisoVencimiento  Int       @default(15)
+  montoInicialCaja      Decimal   @default(150) @db.Decimal(12, 2)
+  mensajeTicket         String?   @default("¡Gracias por su compra!")
+  // Carpeta sincronizada con Google Drive (Google Drive para escritorio).
+  backupCarpeta         String?
+  backupHora            String    @default("22:00")
+  backupConservar       Int       @default(30)
+  // Ruta de pg_dump; vacío = buscarlo en el PATH.
+  pgDumpRuta            String?
+  // Datos del emisor para la facturación electrónica.
+  empresaRazonSocial    String?
+  empresaUbigeo         String?
+  empresaDepartamento   String?
+  empresaProvincia      String?
+  empresaDistrito       String?
+  codigoEstablecimiento String    @default("0000")
+  sunatModo             ModoSunat @default(DESACTIVADO)
+  // Token del servicio de consulta DNI/RUC (Decolecta). Nunca se devuelve al navegador.
+  consultaDocToken      String?
+  // IP de esta PC en el WiFi para los celulares (QR del inventario). 'auto' = detectarla sola; vacío = RED_IP del .env o detectarla.
+  redIp                 String?
+  // Modo nube: hash de la última clave de administrador recibida del panel Infosmart.
+  nubeAdminHash         String?
+  updatedAt             DateTime  @updatedAt
+}
+
+/// Imágenes de la tienda (logotipo, favicon y logo de la boleta). Van en la base para que entren en el backup.
+model ImagenTienda {
+  tipo      TipoImagen @id
+  mime      String
+  datos     Bytes
+  updatedAt DateTime   @updatedAt
+}
+
+enum TipoImagen {
+  LOGO
+  FAVICON
+  LOGO_BOLETA
+}
+
+model Categoria {
+  id        Int        @id @default(autoincrement())
+  nombre    String     @unique
+  productos Producto[]
+}
+
+model Marca {
+  id        Int        @id @default(autoincrement())
+  nombre    String     @unique
+  productos Producto[]
+}
+
+model Producto {
+  id                  Int           @id @default(autoincrement())
+  codigoBarra         String?       @unique
+  // Id del producto en SysVent, para trazar la importación.
+  codigoAnterior      String?       @unique
+  nombre              String
+  categoriaId         Int?
+  marcaId             Int?
+  unidad              String        @default("UND")
+  costo               Decimal       @default(0) @db.Decimal(12, 4)
+  precio1             Decimal       @default(0) @db.Decimal(12, 2)
+  precio2             Decimal       @default(0) @db.Decimal(12, 2)
+  precio3             Decimal       @default(0) @db.Decimal(12, 2)
+  // Si es null se usa el margen de la configuración.
+  margen1             Decimal?      @db.Decimal(6, 2)
+  margen2             Decimal?      @db.Decimal(6, 2)
+  margen3             Decimal?      @db.Decimal(6, 2)
+  stock               Decimal       @default(0) @db.Decimal(12, 3)
+  stockMinimo         Decimal       @default(0) @db.Decimal(12, 3)
+  afectacionIgv       AfectacionIgv @default(EXONERADO)
+  controlaVencimiento Boolean       @default(false)
+  activo              Boolean       @default(true)
+  // Marcado al importar cuando el dato necesita revisión (motivo).
+  revisar             String?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  categoria       Categoria?        @relation(fields: [categoriaId], references: [id])
+  marca           Marca?            @relation(fields: [marcaId], references: [id])
+  lotes           Lote[]
+  movimientos     MovimientoStock[]
+  compraItems     CompraItem[]
+  ventaItems      VentaItem[]
+  presentaciones  Presentacion[]
+  inventarioItems InventarioItem[]
+
+  @@index([nombre])
+}
+
+// Otra forma de vender o comprar el producto (cajetilla x10, paquete x20…).
+// El stock siempre se cuenta en la unidad del producto: vender una
+// presentación descuenta "factor" unidades y comprarla las suma.
+model Presentacion {
+  id          Int     @id @default(autoincrement())
+  productoId  Int
+  nombre      String
+  // Unidades del producto que contiene.
+  factor      Decimal @db.Decimal(12, 3)
+  codigoBarra String? @unique
+  precio1     Decimal @default(0) @db.Decimal(12, 2)
+  precio2     Decimal @default(0) @db.Decimal(12, 2)
+  precio3     Decimal @default(0) @db.Decimal(12, 2)
+  activo      Boolean @default(true)
+
+  producto    Producto     @relation(fields: [productoId], references: [id])
+  ventaItems  VentaItem[]
+  compraItems CompraItem[]
+
+  @@index([productoId])
+}
+
+model Lote {
+  id               Int      @id @default(autoincrement())
+  productoId       Int
+  codigo           String?
+  fechaVencimiento DateTime @db.Date
+  cantidad         Decimal  @db.Decimal(12, 3)
+  compraItemId     Int?     @unique
+  createdAt        DateTime @default(now())
+
+  producto    Producto          @relation(fields: [productoId], references: [id])
+  compraItem  CompraItem?       @relation(fields: [compraItemId], references: [id])
+  movimientos MovimientoStock[]
+
+  @@index([fechaVencimiento])
+}
+
+// Cada entrada o salida de stock. Es la base del kardex.
+model MovimientoStock {
+  id              Int            @id @default(autoincrement())
+  productoId      Int
+  loteId          Int?
+  usuarioId       Int?
+  ventaId         Int?
+  tipo            TipoMovimiento
+  // Positivo entra, negativo sale.
+  cantidad        Decimal        @db.Decimal(12, 3)
+  stockResultante Decimal        @db.Decimal(12, 3)
+  costoUnitario   Decimal        @default(0) @db.Decimal(12, 4)
+  referencia      String?
+  motivo          String?
+  fecha           DateTime       @default(now())
+
+  producto Producto @relation(fields: [productoId], references: [id])
+  lote     Lote?    @relation(fields: [loteId], references: [id])
+  usuario  Usuario? @relation(fields: [usuarioId], references: [id])
+  venta    Venta?   @relation(fields: [ventaId], references: [id])
+
+  @@index([productoId, fecha])
+  @@index([ventaId])
+  @@index([tipo, fecha])
+}
+
+model Proveedor {
+  id              Int      @id @default(autoincrement())
+  ruc             String?  @unique
+  razonSocial     String
+  nombreComercial String?
+  telefono        String?
+  email           String?
+  direccion       String?
+  contacto        String?
+  /// Días de crédito que suele dar (ej. Backus 15): la compra propone Crédito y la fecha de pago.
+  diasCredito     Int?
+  notas           String?
+  activo          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  compras Compra[]
+}
+
+model Compra {
+  id               Int                 @id @default(autoincrement())
+  proveedorId      Int
+  usuarioId        Int
+  tipoDocumento    TipoDocumentoCompra @default(FACTURA)
+  serie            String
+  numero           String
+  fechaEmision     DateTime            @db.Date
+  condicion        CondicionPago       @default(CONTADO)
+  fechaVencimiento DateTime?           @db.Date
+  total            Decimal             @db.Decimal(12, 2)
+  saldo            Decimal             @db.Decimal(12, 2)
+  estado           EstadoCompra        @default(REGISTRADA)
+  observacion      String?
+  createdAt        DateTime            @default(now())
+
+  proveedor Proveedor       @relation(fields: [proveedorId], references: [id])
+  usuario   Usuario         @relation(fields: [usuarioId], references: [id])
+  items     CompraItem[]
+  pagos     PagoProveedor[]
+
+  @@unique([proveedorId, tipoDocumento, serie, numero])
+  @@index([fechaEmision])
+}
+
+model CompraItem {
+  id               Int       @id @default(autoincrement())
+  compraId         Int
+  productoId       Int
+  // Si se compró por presentación, cantidad y costo son de la presentación
+  // y al stock entran cantidad * factor unidades.
+  presentacionId   Int?
+  factor           Decimal   @default(1) @db.Decimal(12, 3)
+  cantidad         Decimal   @db.Decimal(12, 3)
+  costoUnitario    Decimal   @db.Decimal(12, 4)
+  subtotal         Decimal   @db.Decimal(12, 2)
+  codigoLote       String?
+  fechaVencimiento DateTime? @db.Date
+
+  compra       Compra        @relation(fields: [compraId], references: [id])
+  producto     Producto      @relation(fields: [productoId], references: [id])
+  presentacion Presentacion? @relation(fields: [presentacionId], references: [id])
+  lote         Lote?
+}
+
+model PagoProveedor {
+  id              Int       @id @default(autoincrement())
+  compraId        Int
+  usuarioId       Int
+  fecha           DateTime  @default(now())
+  monto           Decimal   @db.Decimal(12, 2)
+  medioPago       MedioPago @default(EFECTIVO)
+  numeroOperacion String?
+  observacion     String?
+
+  compra          Compra           @relation(fields: [compraId], references: [id])
+  usuario         Usuario          @relation(fields: [usuarioId], references: [id])
+  movimientoCaja  MovimientoCaja?
+  movimientoFondo MovimientoFondo?
+}
+
+// ---------------------------------------------------------------- Ventas y caja
+
+enum ModoSunat {
+  DESACTIVADO
+  BETA
+  PRODUCCION
+}
+
+enum EstadoSunat {
+  // Boleta libre o facturación electrónica desactivada.
+  NO_APLICA
+  PENDIENTE
+  ACEPTADO
+  OBSERVADO
+  RECHAZADO
+  // Boleta aceptada y luego anulada: se informa en un resumen diario.
+  BAJA_PENDIENTE
+  BAJA_ENVIADA
+  BAJA_ACEPTADA
+}
+
+enum EstadoResumen {
+  ENVIADO
+  ACEPTADO
+  RECHAZADO
+}
+
+enum TipoComprobante {
+  BOLETA
+  // Documento interno que no va a SUNAT ("boleta de venta libre").
+  BOLETA_LIBRE
+}
+
+enum EstadoVenta {
+  EMITIDA
+  ANULADA
+}
+
+enum EstadoCaja {
+  ABIERTA
+  CERRADA
+}
+
+enum TipoMovimientoCaja {
+  INGRESO
+  EGRESO
+  // Venta anotada a mano en caja, sin boleta ni ticket del sistema.
+  VENTA_SIN_COMPROBANTE
+  // Efectivo que el dueño saca de la caja del día (no es gasto del negocio).
+  RETIRO
+}
+
+enum TipoDocIdentidad {
+  DNI
+  RUC
+  CE
+  SIN_DOCUMENTO
+}
+
+model Serie {
+  id           Int             @id @default(autoincrement())
+  tipo         TipoComprobante
+  serie        String          @unique
+  // Último número emitido; la próxima venta usa ultimoNumero + 1.
+  ultimoNumero Int             @default(0)
+  activa       Boolean         @default(true)
+  ventas       Venta[]
+}
+
+model Cliente {
+  id        Int              @id @default(autoincrement())
+  tipoDoc   TipoDocIdentidad @default(DNI)
+  numeroDoc String?          @unique
+  nombre    String
+  direccion String?
+  telefono  String?
+  email     String?
+  notas     String?
+  // Inactivo: no aparece al elegir cliente en la venta; se conserva por sus ventas.
+  activo    Boolean          @default(true)
+  createdAt DateTime         @default(now())
+  ventas    Venta[]
+}
+
+model Caja {
+  id                Int        @id @default(autoincrement())
+  estado            EstadoCaja @default(ABIERTA)
+  usuarioAperturaId Int
+  fechaApertura     DateTime   @default(now())
+  montoInicial      Decimal    @db.Decimal(12, 2)
+  usuarioCierreId   Int?
+  fechaCierre       DateTime?
+  // Resumen congelado al cerrar: esperado por medio, conteo de billetes, etc.
+  resumenCierre     Json?
+  efectivoEsperado  Decimal?   @db.Decimal(12, 2)
+  efectivoContado   Decimal?   @db.Decimal(12, 2)
+  diferencia        Decimal?   @db.Decimal(12, 2)
+  // true si se cerró marcando "cerrar aunque no cuadre" (efectivo o digital con diferencia).
+  sinCuadrar        Boolean    @default(false)
+  observacion       String?
+
+  usuarioApertura  Usuario           @relation("CajaApertura", fields: [usuarioAperturaId], references: [id])
+  usuarioCierre    Usuario?          @relation("CajaCierre", fields: [usuarioCierreId], references: [id])
+  ventas           Venta[]
+  movimientos      MovimientoCaja[]
+  movimientosFondo MovimientoFondo[]
+
+  @@index([estado])
+}
+
+model MovimientoCaja {
+  id              Int                @id @default(autoincrement())
+  cajaId          Int
+  usuarioId       Int
+  tipo            TipoMovimientoCaja
+  concepto        String
+  monto           Decimal            @db.Decimal(12, 2)
+  // Solo en ventas sin comprobante: con qué se cobró.
+  medioPago       MedioPago?
+  fecha           DateTime           @default(now())
+  // Si el egreso pagó una factura de proveedor.
+  pagoProveedorId Int?               @unique
+
+  caja          Caja           @relation(fields: [cajaId], references: [id])
+  usuario       Usuario        @relation(fields: [usuarioId], references: [id])
+  pagoProveedor PagoProveedor? @relation(fields: [pagoProveedorId], references: [id])
+  gasto         Gasto?
+}
+
+model Venta {
+  id               Int             @id @default(autoincrement())
+  cajaId           Int
+  usuarioId        Int
+  serieId          Int
+  tipoComprobante  TipoComprobante
+  serie            String
+  numero           Int
+  fecha            DateTime        @default(now())
+  clienteId        Int?
+  nivelPrecio      Int             @default(1)
+  // Suma de los ítems antes del descuento global.
+  subtotal         Decimal         @db.Decimal(12, 2)
+  descuento        Decimal         @default(0) @db.Decimal(12, 2)
+  total            Decimal         @db.Decimal(12, 2)
+  opExonerada      Decimal         @default(0) @db.Decimal(12, 2)
+  opGravada        Decimal         @default(0) @db.Decimal(12, 2)
+  opInafecta       Decimal         @default(0) @db.Decimal(12, 2)
+  igv              Decimal         @default(0) @db.Decimal(12, 2)
+  costoTotal       Decimal         @default(0) @db.Decimal(12, 2)
+  efectivoRecibido Decimal?        @db.Decimal(12, 2)
+  vuelto           Decimal         @default(0) @db.Decimal(12, 2)
+  estado           EstadoVenta     @default(EMITIDA)
+  // Administrador que autorizó descuentos.
+  autorizadoPorId  Int?
+  anuladaPorId     Int?
+  fechaAnulacion   DateTime?
+  motivoAnulacion  String?
+  // Facturación electrónica
+  estadoSunat      EstadoSunat     @default(NO_APLICA)
+  hashCpe          String?
+  xmlFirmado       String?
+  cdrCodigo        String?
+  cdrMensaje       String?
+  sunatEnviadoEn   DateTime?
+  sunatIntentos    Int             @default(0)
+  sunatError       String?
+  resumenBajaId    Int?
+
+  caja          Caja              @relation(fields: [cajaId], references: [id])
+  usuario       Usuario           @relation("VentaUsuario", fields: [usuarioId], references: [id])
+  serieRef      Serie             @relation(fields: [serieId], references: [id])
+  cliente       Cliente?          @relation(fields: [clienteId], references: [id])
+  autorizadoPor Usuario?          @relation("VentaAutorizador", fields: [autorizadoPorId], references: [id])
+  anuladaPor    Usuario?          @relation("VentaAnulador", fields: [anuladaPorId], references: [id])
+  items         VentaItem[]
+  pagos         VentaPago[]
+  movimientos   MovimientoStock[]
+  ediciones     VentaEdicion[]
+  envios        EnvioSunat[]
+  resumenBaja   ResumenDiario?    @relation(fields: [resumenBajaId], references: [id])
+
+  @@unique([serie, numero])
+  @@index([estadoSunat])
+  @@index([fecha])
+  @@index([cajaId])
+}
+
+model VentaItem {
+  id             Int           @id @default(autoincrement())
+  ventaId        Int
+  productoId     Int
+  // Si se vendió por presentación, cantidad, precio y costo son de la
+  // presentación y del stock salen cantidad * factor unidades.
+  presentacionId Int?
+  factor         Decimal       @default(1) @db.Decimal(12, 3)
+  descripcion    String
+  cantidad       Decimal       @db.Decimal(12, 3)
+  precioUnitario Decimal       @db.Decimal(12, 2)
+  descuento      Decimal       @default(0) @db.Decimal(12, 2)
+  subtotal       Decimal       @db.Decimal(12, 2)
+  costoUnitario  Decimal       @default(0) @db.Decimal(12, 4)
+  afectacionIgv  AfectacionIgv
+
+  venta        Venta         @relation(fields: [ventaId], references: [id])
+  producto     Producto      @relation(fields: [productoId], references: [id])
+  presentacion Presentacion? @relation(fields: [presentacionId], references: [id])
+}
+
+// Correcciones de una venta ya emitida (comprobante, cliente o pago), autorizadas por un administrador.
+model VentaEdicion {
+  id        Int      @id @default(autoincrement())
+  ventaId   Int
+  usuarioId Int
+  fecha     DateTime @default(now())
+  // Qué cambió, por ejemplo "Comprobante: B001-00000001 → L001-00000003".
+  detalle   String
+
+  venta   Venta   @relation(fields: [ventaId], references: [id])
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+
+  @@index([ventaId])
+}
+
+enum ResultadoEnvio {
+  ACEPTADO
+  OBSERVADO
+  RECHAZADO
+  // SUNAT respondió con un error que no rechaza la boleta (se reintenta).
+  ERROR
+}
+
+// Historial de cada envío de una boleta a SUNAT: fecha y hora y lo que respondió.
+// Los intentos sin internet no se anotan (se reintentan solos cada 2 minutos).
+model EnvioSunat {
+  id        Int            @id @default(autoincrement())
+  ventaId   Int
+  fecha     DateTime       @default(now())
+  resultado ResultadoEnvio
+  codigo    String?
+  mensaje   String?
+
+  venta Venta @relation(fields: [ventaId], references: [id])
+
+  @@index([fecha])
+  @@index([ventaId])
+}
+
+model VentaPago {
+  id              Int       @id @default(autoincrement())
+  ventaId         Int
+  medioPago       MedioPago
+  // Lo que se aplica a la venta (el efectivo ya descuenta el vuelto).
+  monto           Decimal   @db.Decimal(12, 2)
+  numeroOperacion String?
+
+  venta Venta @relation(fields: [ventaId], references: [id])
+}
+
+model Backup {
+  id      Int      @id @default(autoincrement())
+  fecha   DateTime @default(now())
+  archivo String?
+  tamano  Int?
+  ok      Boolean
+  origen  String
+  error   String?
+}
+
+// Resumen diario enviado a SUNAT para dar de baja boletas.
+model ResumenDiario {
+  id              Int           @id @default(autoincrement())
+  identificador   String        @unique
+  fechaReferencia DateTime      @db.Date
+  fechaGeneracion DateTime      @default(now())
+  ticket          String?
+  estado          EstadoResumen @default(ENVIADO)
+  cdrCodigo       String?
+  mensaje         String?
+  xmlFirmado      String?
+  ventas          Venta[]
+}
+
+enum EstadoInventario {
+  // Los celulares pueden enviar conteos.
+  EN_CURSO
+  // Conteo cerrado: el administrador revisa y valida.
+  REVISION
+  VALIDADO
+  CANCELADO
+}
+
+enum EstadoConteo {
+  // Primer conteo del producto o conteo ya resuelto como suma/reemplazo.
+  APLICADO
+  // El producto ya tenía conteo: espera que el administrador elija.
+  PENDIENTE
+  SUMADO
+  REEMPLAZADO
+  DESCARTADO
+}
+
+// Inventario físico hecho con celulares. Se puede seguir vendiendo: cada
+// conteo guarda el stock del sistema en ese momento y al validar se aplica
+// solo la diferencia (contado - stock al contar) sobre el stock actual.
+model Inventario {
+  id          Int              @id @default(autoincrement())
+  // Va en el QR; los celulares lo usan en vez de iniciar sesión.
+  token       String           @unique
+  estado      EstadoInventario @default(EN_CURSO)
+  usuarioId   Int
+  inicio      DateTime         @default(now())
+  fin         DateTime?
+  validadoAt  DateTime?
+  observacion String?
+
+  usuario    Usuario              @relation(fields: [usuarioId], references: [id])
+  operadores InventarioOperador[]
+  items      InventarioItem[]
+  conteos    InventarioConteo[]
+
+  @@index([estado])
+}
+
+model InventarioOperador {
+  id           Int      @id @default(autoincrement())
+  inventarioId Int
+  nombre       String
+  // Lo guarda el celular para retomar si se cierra o se apaga.
+  token        String   @unique
+  // Usuario del sistema cuando cuenta desde la PC (cajera o admin); null = celular.
+  usuarioId    Int?
+  createdAt    DateTime @default(now())
+  ultimoAcceso DateTime @default(now())
+
+  inventario Inventario         @relation(fields: [inventarioId], references: [id])
+  usuario    Usuario?           @relation(fields: [usuarioId], references: [id])
+  conteos    InventarioConteo[]
+
+  @@index([inventarioId, usuarioId])
+}
+
+// Resultado por producto: lo que se tomará al validar.
+model InventarioItem {
+  id              Int      @id @default(autoincrement())
+  inventarioId    Int
+  productoId      Int
+  cantidad        Decimal  @db.Decimal(12, 3)
+  // Stock del sistema cuando se contó (el del conteo que define la cantidad).
+  stockReferencia Decimal  @db.Decimal(12, 3)
+  // Cuándo se tomó ese conteo: los lotes creados después (compras) no se tocan al validar.
+  contadoEn       DateTime @default(now())
+  // Detalle por fecha de vencimiento: [{ "fecha": "2026-12-15", "cantidad": 10 }]. Suma = cantidad.
+  lotes           Json     @default("[]")
+  actualizado     DateTime @default(now())
+
+  inventario Inventario         @relation(fields: [inventarioId], references: [id])
+  producto   Producto           @relation(fields: [productoId], references: [id])
+  conteos    InventarioConteo[]
+
+  @@unique([inventarioId, productoId])
+}
+
+// Cada envío de un celular, tal cual llegó.
+model InventarioConteo {
+  id            Int          @id @default(autoincrement())
+  inventarioId  Int
+  itemId        Int
+  operadorId    Int
+  cantidad      Decimal      @db.Decimal(12, 3)
+  stockAlContar Decimal      @db.Decimal(12, 3)
+  // Mismo formato que InventarioItem.lotes.
+  lotes         Json         @default("[]")
+  estado        EstadoConteo @default(APLICADO)
+  // Id generado en el celular: si reenvía por mala señal no se duplica.
+  clienteId     String       @unique
+  fecha         DateTime     @default(now())
+
+  inventario Inventario         @relation(fields: [inventarioId], references: [id])
+  item       InventarioItem     @relation(fields: [itemId], references: [id])
+  operador   InventarioOperador @relation(fields: [operadorId], references: [id])
+
+  @@index([inventarioId, id])
+}
+
+// ---------------------------------------------------------------------------
+// Roles y permisos
+
+/**
+ * Rol del personal (ej. Cajero). El administrador no usa perfil: tiene todo.
+ */
+model Perfil {
+  id        Int      @id @default(autoincrement())
+  nombre    String   @unique
+  // Claves del catálogo de permisos (backend/src/auth/permisos.ts).
+  permisos  String[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  usuarios Usuario[]
+}
+
+/**
+ * Permiso que se le da o se le quita a un usuario aparte de su rol.
+ */
+model PermisoUsuario {
+  id        Int       @id @default(autoincrement())
+  usuarioId Int
+  permiso   String
+  // true = se le da; false = se le quita aunque su rol lo tenga.
+  concedido Boolean
+  // null = permanente; si no, vale hasta esta fecha y hora.
+  hasta     DateTime?
+  dadoPorId Int
+  createdAt DateTime  @default(now())
+
+  usuario Usuario @relation("PermisoUsuario", fields: [usuarioId], references: [id])
+  dadoPor Usuario @relation("PermisoDadoPor", fields: [dadoPorId], references: [id])
+
+  @@unique([usuarioId, permiso])
+}
+
+/**
+ * Quién dio o quitó cada permiso, o cambió un rol, y cuándo.
+ */
+model PermisoHistorial {
+  id         Int       @id @default(autoincrement())
+  usuarioId  Int?
+  perfilId   Int?
+  permiso    String?
+  // DAR, QUITAR, RESTABLECER (vuelve a lo del rol), CAMBIAR_ROL, EDITAR_ROL, CREAR_ROL, ELIMINAR_ROL
+  accion     String
+  hasta      DateTime?
+  detalle    String?
+  hechoPorId Int
+  createdAt  DateTime  @default(now())
+
+  usuario  Usuario? @relation("HistorialUsuario", fields: [usuarioId], references: [id])
+  hechoPor Usuario  @relation("HistorialHechoPor", fields: [hechoPorId], references: [id])
+
+  @@index([usuarioId, createdAt])
+}
+
+// ---------------------------------------------------------------- Gastos y acumulado
+
+// El acumulado es el dinero de las cajas anteriores: al cerrar la caja del día
+// pasa aquí todo menos el fondo para el día siguiente. Tiene dos saldos.
+enum CuentaFondo {
+  EFECTIVO
+  // Yape y también Plin, tarjeta y transferencia.
+  YAPE
+}
+
+enum TipoMovimientoFondo {
+  // Lo que deja cada cierre de caja.
+  CIERRE_CAJA
+  GASTO
+  PAGO_PROVEEDOR
+  // Retiro del dueño o depósito al banco (no es gasto del negocio).
+  RETIRO
+  // Pase entre efectivo y Yape (dos movimientos, uno por cuenta).
+  TRASPASO
+  // Diferencia encontrada en el conteo semanal.
+  AJUSTE_CONTEO
+  // Devuelve el dinero de un gasto o pago anulado.
+  ANULACION
+}
+
+/// Saldo = suma de `monto` por cuenta: positivo entra, negativo sale.
+model MovimientoFondo {
+  id              Int                 @id @default(autoincrement())
+  fecha           DateTime            @default(now())
+  usuarioId       Int
+  tipo            TipoMovimientoFondo
+  cuenta          CuentaFondo
+  monto           Decimal             @db.Decimal(12, 2)
+  concepto        String
+  cajaId          Int?
+  gastoId         Int?
+  pagoProveedorId Int?                @unique
+  conteoId        Int?
+
+  usuario       Usuario        @relation(fields: [usuarioId], references: [id])
+  caja          Caja?          @relation(fields: [cajaId], references: [id])
+  gasto         Gasto?         @relation(fields: [gastoId], references: [id])
+  pagoProveedor PagoProveedor? @relation(fields: [pagoProveedorId], references: [id])
+  conteo        ConteoFondo?   @relation(fields: [conteoId], references: [id])
+
+  @@index([fecha])
+  @@index([cuenta])
+}
+
+/// Conteo semanal del acumulado, como un cierre de caja.
+model ConteoFondo {
+  id                 Int      @id @default(autoincrement())
+  fecha              DateTime @default(now())
+  usuarioId          Int
+  efectivoEsperado   Decimal  @db.Decimal(12, 2)
+  efectivoContado    Decimal  @db.Decimal(12, 2)
+  yapeEsperado       Decimal  @db.Decimal(12, 2)
+  yapeContado        Decimal  @db.Decimal(12, 2)
+  diferenciaEfectivo Decimal  @db.Decimal(12, 2)
+  diferenciaYape     Decimal  @db.Decimal(12, 2)
+  // Billetes y monedas: [{ denominacion, cantidad }].
+  detalle            Json
+  observacion        String?
+
+  usuario     Usuario           @relation(fields: [usuarioId], references: [id])
+  movimientos MovimientoFondo[]
+}
+
+model CategoriaGasto {
+  id             Int      @id @default(autoincrement())
+  nombre         String   @unique
+  // Sueldos: pide a qué trabajador se le pagó.
+  pideTrabajador Boolean  @default(false)
+  activo         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  gastos      Gasto[]
+  gastosFijos GastoFijo[]
+}
+
+/// Gasto que se repite cada mes (alquiler, internet...): avisa cuando toca pagarlo.
+model GastoFijo {
+  id          Int      @id @default(autoincrement())
+  nombre      String
+  categoriaId Int
+  // Día del mes en que se paga (1 a 31; en meses cortos, el último día).
+  diaPago     Int
+  // Monto de referencia; se puede cambiar al pagar (la luz varía).
+  monto       Decimal? @db.Decimal(12, 2)
+  trabajador  String?
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  categoria CategoriaGasto @relation(fields: [categoriaId], references: [id])
+  gastos    Gasto[]
+}
+
+enum OrigenGasto {
+  // Del acumulado de cajas anteriores (lo normal).
+  ACUMULADO
+  // De la caja del día (cuando falta en el acumulado o es urgente).
+  CAJA
+}
+
+enum EstadoGasto {
+  REGISTRADO
+  ANULADO
+}
+
+model Gasto {
+  id               Int         @id @default(autoincrement())
+  fecha            DateTime    @default(now())
+  categoriaId      Int
+  concepto         String
+  monto            Decimal     @db.Decimal(12, 2)
+  origen           OrigenGasto
+  medioPago        MedioPago   @default(EFECTIVO)
+  numeroOperacion  String?
+  // Para sueldos y adelantos.
+  trabajador       String?
+  // Nota libre: boleta o recibo, número, a quién se pagó...
+  nota             String?
+  gastoFijoId      Int?
+  // Mes que paga un gasto fijo: "2026-11".
+  periodo          String?
+  usuarioId        Int
+  movimientoCajaId Int?        @unique
+  estado           EstadoGasto @default(REGISTRADO)
+  anuladoPorId     Int?
+  fechaAnulacion   DateTime?
+  motivoAnulacion  String?
+
+  categoria      CategoriaGasto    @relation(fields: [categoriaId], references: [id])
+  gastoFijo      GastoFijo?        @relation(fields: [gastoFijoId], references: [id])
+  usuario        Usuario           @relation("GastoUsuario", fields: [usuarioId], references: [id])
+  anuladoPor     Usuario?          @relation("GastoAnulador", fields: [anuladoPorId], references: [id])
+  movimientoCaja MovimientoCaja?   @relation(fields: [movimientoCajaId], references: [id])
+  movimientos    MovimientoFondo[]
+
+  @@index([fecha])
+  @@index([gastoFijoId, periodo])
+}

@@ -27,7 +27,7 @@ export class AuthService implements OnApplicationBootstrap {
     if (!admin || !(await bcrypt.compare(clave, admin.claveHash))) {
       throw new UnauthorizedException('Usuario o clave incorrectos');
     }
-    const token = await this.jwt.signAsync({ sub: admin.id, usuario: admin.usuario });
+    const token = await this.jwt.signAsync({ sub: admin.id, usuario: admin.usuario }, { audience: 'infosmart-panel' });
     return { token, usuario: admin.usuario, nombre: admin.nombre };
   }
 }

@@ -86,3 +86,10 @@ legend { font-size: 13px; color: var(--tenue); padding: 0 4px; }
   .formulario { grid-template-columns: 1fr; }
   .modal { padding: 16px; }
 }
+
+.producto.columna { flex-direction: column; align-items: stretch; gap: 6px; }
+.fila-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.fila-form > input, .fila-form > label { flex: 1 1 160px; }
+.fila-form input[type=file] { padding: 6px; }
+.ok-texto { color: var(--ok); margin: 0; }
+.fila-respaldo { display: flex; justify-content: space-between; align-items: center; gap: 8px; }

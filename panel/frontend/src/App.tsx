@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useState } from 'react';
 import {
   api, Clave, Empresa, Estado, fecha, guardarSesion, NOMBRE_PRODUCTO, Plan, Producto, Resumen, sesion,
 } from './api';
+import { AjustesProducto } from './Ajustes';
 
 export function App() {
   const [s, setS] = useState(sesion());
@@ -125,7 +126,7 @@ function EstadoChip({ e }: { e: Empresa }) {
   return <span className="chip ok">Activa</span>;
 }
 
-function Modal({ titulo, cerrar, children }: { titulo: string; cerrar: () => void; children: React.ReactNode }) {
+export function Modal({ titulo, cerrar, children }: { titulo: string; cerrar: () => void; children: React.ReactNode }) {
   useEffect(() => {
     const f = (ev: KeyboardEvent) => ev.key === 'Escape' && cerrar();
     addEventListener('keydown', f); return () => removeEventListener('keydown', f);
@@ -196,6 +197,7 @@ function Detalle({ id, planes, cerrar, cambio, mostrarClaves }: {
   const [e, setE] = useState<Empresa | null>(null);
   const [error, setError] = useState('');
   const [meses, setMeses] = useState(1);
+  const [configurando, setConfigurando] = useState<Producto | null>(null);
 
   const cargar = useCallback(() => api<Empresa>(`/empresas/${id}`).then(setE), [id]);
   useEffect(() => { cargar(); }, [cargar]);
@@ -218,6 +220,7 @@ function Detalle({ id, planes, cerrar, cambio, mostrarClaves }: {
   });
 
   if (!e) return <Modal titulo="Empresa" cerrar={cerrar}><p className="tenue">Cargando…</p></Modal>;
+  if (configurando) return <AjustesProducto empresa={e} producto={configurando} volver={() => { setConfigurando(null); cargar(); }} />;
   const faltan = (['VENTAS', 'LAVADERO'] as Producto[]).filter((p) => !e.productos.some((x) => x.producto === p));
 
   return (
@@ -252,7 +255,10 @@ function Detalle({ id, planes, cerrar, cambio, mostrarClaves }: {
               <div className="tenue">Admin <span className="mono">{p.adminUsuario}</span> · BD <span className="mono">{p.baseDatos}</span></div>
               <div className="tenue">{p.aprovisionado ? 'Listo para usar' : 'Se prepara en el primer ingreso'}{p.adminClaveTemporal ? ' · clave temporal sin cambiar' : ''}</div>
             </div>
-            <button onClick={() => restablecer(p.producto)}>Nueva clave</button>
+            <div className="botonera">
+              <button onClick={() => setConfigurando(p.producto)}>Configurar</button>
+              <button onClick={() => restablecer(p.producto)}>Nueva clave</button>
+            </div>
           </div>
         ))}
         {faltan.map((p) => <button key={p} className="enlace" onClick={() => agregar(p)}>+ Agregar {NOMBRE_PRODUCTO[p]}</button>)}

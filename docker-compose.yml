@@ -1,5 +1,5 @@
-# Infosmart: panel administrativo + PostgreSQL compartido.
-# Cada empresa tendrá sus bases (ventas_<sub>, lavadero_<sub>) en este mismo PostgreSQL.
+# Infosmart: panel administrativo, sistema de ventas multiempresa y PostgreSQL compartido.
+# Cada empresa tiene sus bases (ventas_<sub>, lavadero_<sub>) en este mismo PostgreSQL.
 services:
   db:
     image: postgres:17-alpine
@@ -25,17 +25,42 @@ services:
       DATABASE_URL: postgresql://infosmart:${DB_CLAVE}@db:5432/infosmart_panel
       JWT_SECRETO: ${JWT_SECRETO:?Define JWT_SECRETO en .env}
       CLAVE_INTERNA: ${CLAVE_INTERNA:?Define CLAVE_INTERNA en .env}
+      CLAVE_CIFRADO: ${CLAVE_CIFRADO:?Define CLAVE_CIFRADO en .env}
       SUPERADMIN_USUARIO: ${SUPERADMIN_USUARIO:-diego}
       SUPERADMIN_CLAVE: ${SUPERADMIN_CLAVE:?Define SUPERADMIN_CLAVE en .env}
       DOMINIO_BASE: ${DOMINIO_BASE:-190.119.59.24.nip.io}
       DIAS_PRUEBA: ${DIAS_PRUEBA:-15}
+    volumes:
+      - respaldos:/respaldos
+
+  ventas:
+    build: ./ventas
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      panel-api:
+        condition: service_started
+    environment:
+      PANEL_URL: http://panel-api:3100
+      CLAVE_INTERNA: ${CLAVE_INTERNA}
+      DOMINIO_BASE: ${DOMINIO_BASE:-190.119.59.24.nip.io}
+      EMPRESA_DATABASE_URL: postgresql://infosmart:${DB_CLAVE}@db:5432/{db}?schema=public
+      # Distinta a la del panel: un token de una empresa nunca sirve en el panel
+      JWT_SECRET: ${JWT_SECRETO}-ventas
+      URL_PUBLICA: ${URL_PUBLICA:-http://{sub}.190.119.59.24.nip.io:8092}
+      TZ: America/Lima
 
   panel-web:
     build: ./panel/frontend
     restart: unless-stopped
-    depends_on: [panel-api]
+    depends_on: [panel-api, ventas]
+    environment:
+      DOMINIO_BASE: ${DOMINIO_BASE:-190.119.59.24.nip.io}
+      IP_PANEL: ${IP_PANEL:-190.119.59.24}
     ports:
       - "${PANEL_PUERTO:-8090}:80"
 
 volumes:
   datos-db:
+  respaldos:

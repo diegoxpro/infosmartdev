@@ -53,3 +53,26 @@ export const NOMBRE_PRODUCTO: Record<Producto, string> = { VENTAS: 'Sistema de v
 export function fecha(iso: string) {
   return new Date(iso).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
 }
+
+export interface Ajustes {
+  sunatModo: 'DESACTIVADO' | 'BETA' | 'PRODUCCION';
+  solUsuario: string | null; solConfigurada: boolean;
+  certificado: { sujeto: string | null; venceEl: string | null } | null;
+  consultaDocConfigurado: boolean; backupHora: string; backupConservar: number;
+}
+export interface Respaldo { id: number; ok: boolean; motivo: string; nombre: string | null; bytes: number | null; error: string | null; disponible: boolean; creadoEl: string }
+
+/** Descarga un archivo de la API con la sesión del superadmin. */
+export async function descargar(ruta: string, nombre: string) {
+  const s = sesion();
+  const r = await fetch(`/api${ruta}`, { headers: s ? { Authorization: `Bearer ${s.token}` } : {} });
+  if (!r.ok) throw new Error('No se pudo descargar el archivo');
+  const url = URL.createObjectURL(await r.blob());
+  Object.assign(document.createElement('a'), { href: url, download: nombre }).click();
+  URL.revokeObjectURL(url);
+}
+
+export function tamano(bytes: number | null) {
+  if (bytes == null) return '';
+  return bytes > 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}

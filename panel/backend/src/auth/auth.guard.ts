@@ -10,7 +10,7 @@ export class SuperadminGuard implements CanActivate {
     const [tipo, token] = (req.headers.authorization ?? '').split(' ');
     if (tipo !== 'Bearer' || !token) throw new UnauthorizedException();
     try {
-      req.superadmin = await this.jwt.verifyAsync(token);
+      req.superadmin = await this.jwt.verifyAsync(token, { audience: 'infosmart-panel' });
       return true;
     } catch {
       throw new UnauthorizedException('Sesión vencida, vuelve a ingresar');

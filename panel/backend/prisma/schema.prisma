@@ -21,6 +21,12 @@ enum Producto {
   LAVADERO
 }
 
+enum ModoSunat {
+  DESACTIVADO
+  BETA
+  PRODUCCION
+}
+
 model Superadmin {
   id        Int      @id @default(autoincrement())
   usuario   String   @unique
@@ -70,8 +76,45 @@ model ProductoEmpresa {
   // true cuando el producto ya corrió sus migraciones y creó al administrador en su base
   aprovisionado      Boolean  @default(false)
   creadoEl           DateTime @default(now())
+  ajustes            AjustesProducto?
+  respaldos          Respaldo[]
 
   @@unique([empresaId, producto])
+}
+
+// Lo que Infosmart controla de cada producto de una empresa. Las claves van cifradas
+// con CLAVE_CIFRADO (AES-256-GCM) y solo salen descifradas por la API interna.
+model AjustesProducto {
+  productoEmpresaId       Int             @id
+  productoEmpresa         ProductoEmpresa @relation(fields: [productoEmpresaId], references: [id])
+  sunatModo               ModoSunat       @default(DESACTIVADO)
+  solUsuario              String?
+  solClaveCifrada         String?
+  certificadoCifrado      String?
+  certificadoClaveCifrada String?
+  certificadoSujeto       String?
+  certificadoVence        DateTime?
+  consultaDocTokenCifrado String?
+  // Hora de Lima del backup diario y cuántos se conservan
+  backupHora              String          @default("03:00")
+  backupConservar         Int             @default(14)
+  actualizadoEl           DateTime        @updatedAt
+}
+
+model Respaldo {
+  id                Int             @id @default(autoincrement())
+  productoEmpresaId Int
+  productoEmpresa   ProductoEmpresa @relation(fields: [productoEmpresaId], references: [id])
+  ok                Boolean
+  motivo            String
+  archivo           String?
+  bytes             Int?
+  error             String?
+  // false cuando el archivo ya se borró por antigüedad
+  disponible        Boolean         @default(true)
+  creadoEl          DateTime        @default(now())
+
+  @@index([productoEmpresaId, creadoEl])
 }
 
 model Evento {
