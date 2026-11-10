@@ -7,9 +7,11 @@
 :80 {
 	encode gzip
 
-	# La API interna solo se usa dentro de Docker (ventas → panel)
-	@interno path /api/interno/*
-	respond @interno 404
+	# La API interna solo se usa dentro de Docker (ventas → panel). Va en un handle:
+	# Caddy evalúa los handle antes que un respond suelto.
+	handle /api/interno/* {
+		respond 404
+	}
 
 	# Panel Infosmart: admin.<dominio>, o la IP sola (http://190.119.59.24:8092)
 	@panel host admin.{$DOMINIO_BASE} {$IP_PANEL} localhost
