@@ -1,0 +1,41 @@
+# Infosmart: panel administrativo + PostgreSQL compartido.
+# Cada empresa tendrá sus bases (ventas_<sub>, lavadero_<sub>) en este mismo PostgreSQL.
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: infosmart
+      POSTGRES_PASSWORD: ${DB_CLAVE:?Define DB_CLAVE en .env}
+      POSTGRES_DB: infosmart_panel
+    volumes:
+      - datos-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U infosmart -d infosmart_panel"]
+      interval: 5s
+      retries: 20
+
+  panel-api:
+    build: ./panel/backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://infosmart:${DB_CLAVE}@db:5432/infosmart_panel
+      JWT_SECRETO: ${JWT_SECRETO:?Define JWT_SECRETO en .env}
+      CLAVE_INTERNA: ${CLAVE_INTERNA:?Define CLAVE_INTERNA en .env}
+      SUPERADMIN_USUARIO: ${SUPERADMIN_USUARIO:-diego}
+      SUPERADMIN_CLAVE: ${SUPERADMIN_CLAVE:?Define SUPERADMIN_CLAVE en .env}
+      DOMINIO_BASE: ${DOMINIO_BASE:-190.119.59.24.nip.io}
+      DIAS_PRUEBA: ${DIAS_PRUEBA:-15}
+
+  panel-web:
+    build: ./panel/frontend
+    restart: unless-stopped
+    depends_on: [panel-api]
+    ports:
+      - "${PANEL_PUERTO:-8090}:80"
+
+volumes:
+  datos-db:

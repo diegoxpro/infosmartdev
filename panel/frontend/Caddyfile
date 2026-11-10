@@ -1,0 +1,13 @@
+# Para pruebas se sirve por HTTP en un puerto. Con el dominio real (admin.infosmart.pe)
+# este bloque pasa al proxy principal con HTTPS (ver deploy/README).
+:80 {
+	encode gzip
+	handle /api/* {
+		reverse_proxy panel-api:3100
+	}
+	handle {
+		root * /srv/panel
+		try_files {path} /index.html
+		file_server
+	}
+}
