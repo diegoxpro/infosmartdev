@@ -1,0 +1,90 @@
+CANDY'S MARKET - INSTALADOR PARA WINDOWS
+========================================
+
+Qué necesitas en la PC de la tienda
+-----------------------------------
+- Windows 10 u 11 de 64 bits.
+- PostgreSQL 17 instalado. Descárgalo de
+  https://www.enterprisedb.com/downloads/postgres-postgresql-downloads
+  (Windows x86-64) y anota la contraseña del usuario postgres.
+  En el instalador de PostgreSQL deja todo como viene; no hace falta Stack Builder.
+- No necesitas instalar Node ni tener internet: el paquete ya lo trae todo.
+
+1. En la PC actual (la que ya tiene el sistema)
+-----------------------------------------------
+1) Cierra la caja del día.
+2) Entra como admin a Configuración > Backup y presiona "Hacer backup ahora".
+3) Copia a un USB el archivo .backup más reciente. Está en la carpeta
+   backups del sistema (en la PC actual: D:\syscandys\sysventcandys\backend\backups)
+   o en tu carpeta de Google Drive.
+4) Opcional, para no volver a cargar el certificado SUNAT: copia también la
+   carpeta "secretos" (D:\syscandys\sysventcandys\backend\secretos) y ponla
+   junto a INSTALAR.bat. Tiene tu certificado y tu clave SOL: bórrala del USB
+   cuando termines.
+5) Desde aquí, no vendas más en la PC actual; las ventas nuevas no pasarían
+   a la PC de la tienda.
+
+2. En la PC de la tienda
+------------------------
+1) Descomprime este zip (clic derecho > Extraer todo).
+2) Doble clic en INSTALAR.bat. Si Windows muestra "Windows protegió su PC",
+   elige "Más información" > "Ejecutar de todas formas".
+3) Responde las preguntas:
+   - Carpeta: presiona Enter para usar C:\CandysMarket.
+   - Clave de PostgreSQL de esa PC.
+   - Archivo de backup: arrastra el archivo .backup a la ventana y presiona Enter.
+   - Si quieres que el sistema se abra solo al encender la PC.
+4) Al terminar se abre el sistema en el navegador (http://localhost:3000).
+   Entra con tus usuarios y claves de siempre.
+
+Después de instalar
+-------------------
+- Revisa Configuración > Backup: la carpeta de Google Drive debe existir en
+  esta PC (instala Google Drive para escritorio).
+- Si no copiaste la carpeta secretos, carga el certificado .pfx y el usuario
+  SOL en Configuración > SUNAT.
+- Instala la ticketera POS-80C como impresora predeterminada y activa en su
+  driver la apertura de gaveta. Con Google Chrome el ticket sale sin cuadro
+  de diálogo.
+
+Uso diario
+----------
+- "Candy's Market" en el escritorio: enciende el sistema y abre el navegador.
+- "Cerrar Candy's Market": lo apaga.
+- "Actualizar Candy's Market": trae lo último de GitHub (ver abajo).
+- Si no abre, el detalle del error está en C:\CandysMarket\logs\sistema.log
+
+Actualizar (si la PC ya tiene el sistema instalado con este paquete)
+--------------------------------------------------------------------
+1) Cierra la caja del día.
+2) Descomprime el zip nuevo y haz doble clic en ACTUALIZAR.bat.
+3) Presiona Enter para usar la carpeta que encuentra (C:\CandysMarket).
+Apaga el sistema, guarda una copia de la base de datos en datos\backups,
+cambia el programa, actualiza la base y lo vuelve a abrir. Tus datos,
+usuarios, certificado SUNAT y configuración se quedan igual.
+
+Actualizar desde GitHub (con internet)
+--------------------------------------
+En el escritorio queda "Actualizar Candy's Market". Con doble clic:
+1) Te muestra qué cambió desde tu versión y pregunta si actualizar.
+2) Baja el código de GitHub y lo compila en C:\CandysMarket\actualizacion
+   (unos minutos; el sistema sigue funcionando mientras tanto).
+3) Recién al final apaga el sistema, guarda un backup de la base, cambia el
+   programa y lo vuelve a abrir.
+Si se corta la luz o el internet antes del paso 3, el sistema queda como
+estaba: solo vuelve a hacer doble clic. Cierra la caja antes de actualizar.
+
+Celulares para el inventario
+----------------------------
+Al instalar o actualizar, Windows pide permiso de administrador una vez para
+abrir los puertos 3443 y 3080 en la red privada. Acepta con "Sí". Los
+celulares deben estar en el mismo WiFi que la PC, y la red de Windows debe
+estar como "Privada". En Inventario > Realizar inventario aparece el QR.
+
+Dónde queda cada cosa (C:\CandysMarket)
+---------------------------------------
+app\       el programa (se reemplaza al actualizar)
+datos\     config.env (clave de la base), secretos (SUNAT), backups y
+           certificados-red (certificado para los celulares)
+logs\      registro del sistema
+scripts\   arranque y cierre
