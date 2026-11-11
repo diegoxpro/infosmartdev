@@ -2,7 +2,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { ReactNode, useEffect, useState } from 'react';
 import { api } from '../api';
 import { useAuth } from '../auth';
-import { urlImagen, useMarca } from '../marca';
+import { inicialMarca, nombreMarca, urlImagen, useMarca } from '../marca';
 import { veConfiguracion } from '../pages/Configuracion';
 import { venceTexto } from '../format';
 import { Alertas } from '../types';
@@ -94,13 +94,13 @@ export default function Layout() {
       <aside className="sidebar">
         {logo ? (
           <div className="brand brand-logo">
-            <img src={logo} alt={marca.nombre} />
+            <img src={logo} alt={nombreMarca(marca)} />
           </div>
         ) : (
           <div className="brand">
-            <div className="brand-mark">C</div>
+            <div className="brand-mark">{inicialMarca(marca)}</div>
             <div>
-              <b>Candy's Market</b>
+              <b>{nombreMarca(marca)}</b>
               <span>Sistema de ventas</span>
             </div>
           </div>

@@ -63,6 +63,7 @@ export default function Configuracion() {
 
 function Preferencias() {
   const avisar = useToast();
+  const { marca, setMarca } = useMarca();
   const { data } = useCarga(() => api<Config>('/configuracion'), []);
   const [f, setF] = useState<Record<string, string | boolean>>({});
   useEffect(() => {
@@ -102,6 +103,8 @@ function Preferencias() {
           mensajeTicket: String(f.mensajeTicket),
         },
       });
+      // El nombre del menú, el login y la pestaña se actualiza sin recargar.
+      setMarca({ ...marca, nombre: String(f.empresaNombre) });
       avisar('Preferencias guardadas');
     } catch (e) {
       avisar((e as Error).message, true);

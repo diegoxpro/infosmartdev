@@ -7,7 +7,13 @@ export interface Marca {
   versiones: Record<TipoImagen, number | null>;
 }
 
-const VACIA: Marca = { nombre: "Candy's Market", versiones: { LOGO: null, FAVICON: null, LOGO_BOLETA: null } };
+/** Mientras carga se muestra un nombre neutro: el de la empresa llega desde Configuración. */
+const VACIA: Marca = { nombre: '', versiones: { LOGO: null, FAVICON: null, LOGO_BOLETA: null } };
+
+/** Nombre a mostrar en el login, el menú y la pestaña. */
+export const nombreMarca = (m: Marca) => m.nombre.trim() || 'Sistema de ventas';
+/** Letra del cuadrito cuando no hay logo. */
+export const inicialMarca = (m: Marca) => (m.nombre.trim()[0] ?? 'S').toUpperCase();
 
 /** Última marca cargada, para el ticket (que se arma fuera de React). */
 let actual: Marca = VACIA;
@@ -30,6 +36,10 @@ export function MarcaProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     api<Marca>('/configuracion/imagenes').then(setMarca, () => {});
   }, [setMarca]);
+  // Título de la pestaña con el nombre de la empresa.
+  useEffect(() => {
+    document.title = nombreMarca(marca);
+  }, [marca]);
   // Favicon de la pestaña.
   useEffect(() => {
     const url = urlImagen('FAVICON', marca);
