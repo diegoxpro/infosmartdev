@@ -2,7 +2,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { ReactNode, useEffect, useState } from 'react';
 import { api } from '../api';
 import { useAuth } from '../auth';
-import { urlImagen, useMarca } from '../marca';
+import { nombreMarca, urlImagen, useMarca } from '../marca';
 import { veConfiguracion } from '../pages/Configuracion';
 import { venceTexto } from '../format';
 import { Alertas } from '../types';
@@ -98,9 +98,9 @@ export default function Layout() {
           </div>
         ) : (
           <div className="brand">
-            <div className="brand-mark">C</div>
+            <div className="brand-mark">{nombreMarca(marca).charAt(0).toUpperCase()}</div>
             <div>
-              <b>Candy's Market</b>
+              <b>{nombreMarca(marca)}</b>
               <span>Sistema de ventas</span>
             </div>
           </div>

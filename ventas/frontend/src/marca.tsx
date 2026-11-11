@@ -7,11 +7,15 @@ export interface Marca {
   versiones: Record<TipoImagen, number | null>;
 }
 
-const VACIA: Marca = { nombre: "Candy's Market", versiones: { LOGO: null, FAVICON: null, LOGO_BOLETA: null } };
+// Mientras llega el nombre de la empresa (cada empresa tiene el suyo) no se muestra ninguno de relleno.
+const VACIA: Marca = { nombre: '', versiones: { LOGO: null, FAVICON: null, LOGO_BOLETA: null } };
 
 /** Última marca cargada, para el ticket (que se arma fuera de React). */
 let actual: Marca = VACIA;
 export const marcaActual = () => actual;
+
+/** Nombre a mostrar: el de la empresa, o un genérico mientras carga. */
+export const nombreMarca = (m: Marca = actual) => m.nombre.trim() || 'Sistema de ventas';
 
 /** URL de la imagen, o null si no hay. La versión en la URL evita que el navegador muestre la anterior. */
 export function urlImagen(tipo: TipoImagen, m: Marca = actual) {
@@ -30,6 +34,10 @@ export function MarcaProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     api<Marca>('/configuracion/imagenes').then(setMarca, () => {});
   }, [setMarca]);
+  // Título de la pestaña con el nombre de la empresa.
+  useEffect(() => {
+    document.title = nombreMarca(marca);
+  }, [marca]);
   // Favicon de la pestaña.
   useEffect(() => {
     const url = urlImagen('FAVICON', marca);

@@ -1,7 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { useAuth } from '../auth';
 import { Campo } from '../components/ui';
-import { urlImagen, useMarca } from '../marca';
+import { nombreMarca, urlImagen, useMarca } from '../marca';
 
 export default function Login() {
   const { entrar } = useAuth();
@@ -35,9 +35,9 @@ export default function Login() {
           </div>
         ) : (
           <div className="row" style={{ gap: 12 }}>
-            <div className="brand-mark" style={{ width: 40, height: 40, fontSize: 18 }}>C</div>
+            <div className="brand-mark" style={{ width: 40, height: 40, fontSize: 18 }}>{nombreMarca(marca).charAt(0).toUpperCase()}</div>
             <div>
-              <h1>Candy's Market</h1>
+              <h1>{nombreMarca(marca)}</h1>
               <div className="muted">Ingresa para continuar</div>
             </div>
           </div>

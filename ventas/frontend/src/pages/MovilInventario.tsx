@@ -2,6 +2,7 @@ import { BrowserMultiFormatReader, IScannerControls } from '@zxing/browser';
 import { BarcodeFormat, DecodeHintType } from '@zxing/library';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import '../movil.css';
+import { nombreMarca, useMarca } from '../marca';
 
 /**
  * Página del celular para el inventario. No usa usuario del sistema: entra con
@@ -367,6 +368,7 @@ export function Contador({ op, claveCola, alSalir, enPc = false }: { op: Pick<Op
 }
 
 function Entrar({ qr, alEntrar, error, setError }: { qr: string; alEntrar: (o: Operador) => void; error: string; setError: (e: string) => void }) {
+  const { marca } = useMarca();
   const [nombre, setNombre] = useState(() => leer(CLAVE_NOMBRE, ''));
   const [ocupado, setOcupado] = useState(false);
   if (!qr) {
@@ -393,7 +395,7 @@ function Entrar({ qr, alEntrar, error, setError }: { qr: string; alEntrar: (o: O
   };
   return (
     <form className="mv mv-centro" onSubmit={entrar}>
-      <h2>Inventario · Candy's Market</h2>
+      <h2>Inventario · {nombreMarca(marca)}</h2>
       <label className="mv-campo">
         Tu nombre
         <input value={nombre} onChange={(e) => setNombre(e.target.value)} autoFocus maxLength={40} placeholder="Ej. Juan" autoComplete="given-name" />
