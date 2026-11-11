@@ -3,6 +3,9 @@ import { EstadoEmpresa, Producto } from '@prisma/client';
 
 export const SUBDOMINIOS_RESERVADOS = new Set([
   'admin', 'panel', 'api', 'www', 'mail', 'correo', 'app', 'soporte', 'infosmart', 'demo', 'static',
+  // Nombres que en ciardi.lat ya usan otros servicios (túneles de Cloudflare): un registro con nombre
+  // propio gana al comodín, así que una empresa con ese subdominio nunca llegaría a Infosmart.
+  ...(process.env.SUBDOMINIOS_OCUPADOS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
 ]);
 
 // empresa1, mi-tienda: minúsculas, números y guiones; 3 a 30 caracteres, sin guion al inicio o al final

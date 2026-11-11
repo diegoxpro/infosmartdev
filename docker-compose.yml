@@ -30,6 +30,7 @@ services:
       SUPERADMIN_CLAVE: ${SUPERADMIN_CLAVE:?Define SUPERADMIN_CLAVE en .env}
       DOMINIO_BASE: ${DOMINIO_BASE:-190.119.59.24.nip.io}
       DIAS_PRUEBA: ${DIAS_PRUEBA:-15}
+      SUBDOMINIOS_OCUPADOS: ${SUBDOMINIOS_OCUPADOS:-}
     volumes:
       - respaldos:/respaldos
 
